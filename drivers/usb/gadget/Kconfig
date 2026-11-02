@@ -237,6 +237,15 @@ config USB_CONFIGFS
 	  appropriate symbolic links.
 	  For more information see Documentation/usb/gadget_configfs.rst.
 
+config USB_CONFIGFS_UEVENT
+	bool "Gadget state uevents for Android"
+	depends on USB_CONFIGFS
+	help
+	  Create /sys/class/android_usb/android0 and send USB_STATE=CONNECTED,
+	  CONFIGURED and DISCONNECTED uevents from it. Android's USB service
+	  manages the device side (USB debugging, file transfer, the USB mode
+	  settings) only with them.
+
 config USB_CONFIGFS_SERIAL
 	bool "Generic serial bulk in/out"
 	depends on USB_CONFIGFS
