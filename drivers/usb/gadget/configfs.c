@@ -59,6 +59,12 @@ struct gadget_info {
 
 	spinlock_t spinlock;
 	bool unbind;
+#ifdef CONFIG_USB_CONFIGFS_UEVENT
+	struct work_struct work;
+	struct device *dev;
+	bool connected;
+	bool sw_connected;
+#endif
 };
 
 static inline struct gadget_info *to_gadget_info(struct config_item *item)
@@ -397,10 +403,114 @@ static inline struct usb_function_instance *to_usb_function_instance(
 			 struct usb_function_instance, group);
 }
 
+#ifdef CONFIG_USB_CONFIGFS_UEVENT
+/*
+ * Android's USB service manages the device side only when /sys/class/android_usb exists, and
+ * follows the connection through the USB_STATE uevents of android0 (as in Android's common
+ * kernel). gi->spinlock covers connected and the configuration, setup and disconnect run under
+ * it.
+ */
+static struct class *android_class;
+static int gadget_index;
+
+static void android_work(struct work_struct *data)
+{
+	struct gadget_info *gi = container_of(data, struct gadget_info, work);
+	char *disconnected[2] = { "USB_STATE=DISCONNECTED", NULL };
+	char *connected[2] = { "USB_STATE=CONNECTED", NULL };
+	char *configured[2] = { "USB_STATE=CONFIGURED", NULL };
+	bool connect = false, config = false, disconnect = false;
+	unsigned long flags;
+
+	if (!gi->dev)
+		return;
+
+	spin_lock_irqsave(&gi->spinlock, flags);
+	if (gi->cdev.config)
+		config = true;
+	if (gi->connected != gi->sw_connected) {
+		if (gi->connected)
+			connect = true;
+		else
+			disconnect = true;
+		gi->sw_connected = gi->connected;
+	}
+	spin_unlock_irqrestore(&gi->spinlock, flags);
+
+	if (connect)
+		kobject_uevent_env(&gi->dev->kobj, KOBJ_CHANGE, connected);
+	if (config)
+		kobject_uevent_env(&gi->dev->kobj, KOBJ_CHANGE, configured);
+	if (disconnect)
+		kobject_uevent_env(&gi->dev->kobj, KOBJ_CHANGE, disconnected);
+}
+
+/* called with gi->spinlock held */
+static void android_set_connected(struct gadget_info *gi, bool connected)
+{
+	if (gi->connected != connected) {
+		gi->connected = connected;
+		schedule_work(&gi->work);
+	}
+}
+
+static ssize_t state_show(struct device *pdev, struct device_attribute *attr, char *buf)
+{
+	struct gadget_info *gi = dev_get_drvdata(pdev);
+	const char *state = "DISCONNECTED";
+	unsigned long flags;
+
+	spin_lock_irqsave(&gi->spinlock, flags);
+	if (gi->cdev.config)
+		state = "CONFIGURED";
+	else if (gi->connected)
+		state = "CONNECTED";
+	spin_unlock_irqrestore(&gi->spinlock, flags);
+
+	return sysfs_emit(buf, "%s\n", state);
+}
+static DEVICE_ATTR_RO(state);
+
+static struct attribute *android_usb_attrs[] = {
+	&dev_attr_state.attr,
+	NULL,
+};
+ATTRIBUTE_GROUPS(android_usb);
+
+static void android_device_create(struct gadget_info *gi)
+{
+	INIT_WORK(&gi->work, android_work);
+	if (!android_class)
+		return;
+
+	gi->dev = device_create_with_groups(android_class, NULL, MKDEV(0, 0), gi,
+					    android_usb_groups, "android%d", gadget_index);
+	if (IS_ERR(gi->dev)) {
+		pr_err("configfs-gadget: no android%d device: %ld\n", gadget_index,
+		       PTR_ERR(gi->dev));
+		gi->dev = NULL;
+		return;
+	}
+	gadget_index++;
+}
+
+static void android_device_destroy(struct gadget_info *gi)
+{
+	cancel_work_sync(&gi->work);
+	if (gi->dev)
+		device_unregister(gi->dev);
+	gi->dev = NULL;
+}
+#else
+static inline void android_device_create(struct gadget_info *gi) {}
+static inline void android_device_destroy(struct gadget_info *gi) {}
+#endif
+
 static void gadget_info_attr_release(struct config_item *item)
 {
 	struct gadget_info *gi = to_gadget_info(item);
 
+	android_device_destroy(gi);
 	WARN_ON(!list_empty(&gi->cdev.configs));
 	WARN_ON(!list_empty(&gi->string_list));
 	WARN_ON(!list_empty(&gi->available_func));
@@ -1875,6 +1985,12 @@ static int configfs_composite_setup(struct usb_gadget *gadget,
 	}
 
 	ret = composite_setup(gadget, ctrl);
+#ifdef CONFIG_USB_CONFIGFS_UEVENT
+	android_set_connected(gi, true);
+	if ((ctrl->bRequestType & USB_TYPE_MASK) == USB_TYPE_STANDARD &&
+	    ctrl->bRequest == USB_REQ_SET_CONFIGURATION && cdev->config)
+		schedule_work(&gi->work);
+#endif
 	spin_unlock_irqrestore(&gi->spinlock, flags);
 	return ret;
 }
@@ -1898,6 +2014,9 @@ static void configfs_composite_disconnect(struct usb_gadget *gadget)
 	}
 
 	composite_disconnect(gadget);
+#ifdef CONFIG_USB_CONFIGFS_UEVENT
+	android_set_connected(gi, false);
+#endif
 	spin_unlock_irqrestore(&gi->spinlock, flags);
 }
 
@@ -2046,6 +2165,8 @@ static struct config_group *gadgets_make(
 	if (!gi->composite.gadget_driver.function)
 		goto out_free_driver_name;
 
+	android_device_create(gi);
+
 	return &gi->group;
 
 out_free_driver_name:
@@ -2096,6 +2217,14 @@ static int __init gadget_cfs_init(void)
 
 	config_group_init(&gadget_subsys.su_group);
 
+#ifdef CONFIG_USB_CONFIGFS_UEVENT
+	android_class = class_create("android_usb");
+	if (IS_ERR(android_class)) {
+		pr_err("configfs-gadget: no android_usb class: %ld\n", PTR_ERR(android_class));
+		android_class = NULL;
+	}
+#endif
+
 	ret = configfs_register_subsystem(&gadget_subsys);
 	return ret;
 }
@@ -2104,5 +2233,9 @@ module_init(gadget_cfs_init);
 static void __exit gadget_cfs_exit(void)
 {
 	configfs_unregister_subsystem(&gadget_subsys);
+#ifdef CONFIG_USB_CONFIGFS_UEVENT
+	if (android_class)
+		class_destroy(android_class);
+#endif
 }
 module_exit(gadget_cfs_exit);
