@@ -1,0 +1,135 @@
+// SPDX-License-Identifier: BSD-3-Clause
+/*
+ * Pantech VEGA IRON 2 (EF71S / IM-100S, EF71AS)
+ *
+ * The Pantech aboot does not read the board id from SMEM: every build
+ * hardcodes the one of the revision it shipped with, and the DTB has to
+ * match it exactly. List every revision of every EF71 variant
+ * (S 201..206, K 211..216, G 241..246), with both subtypes.
+ *
+ * Copyright (c) 2026, hiru <rlawoehd187@naver.com>
+ */
+/dts-v1/;
+
+#include <dt-bindings/arm/qcom,ids.h>
+#include <dt-bindings/gpio/gpio.h>
+
+#include "msm8937.dtsi"
+#include "pm8937.dtsi"
+#include "pmi8950.dtsi"
+
+/ {
+	model = "Pantech VEGA IRON 2 (EF71)";
+	compatible = "pantech,ef71", "qcom,msm8937";
+	chassis-type = "handset";
+
+	qcom,msm-id = <QCOM_ID_MSM8937 0x0>;
+	qcom,board-id = <201 0>, <202 0>, <203 0>, <204 0>, <205 0>, <206 0>,
+			<201 1>, <202 1>, <203 1>, <204 1>, <205 1>, <206 1>,
+			<211 0>, <212 0>, <213 0>, <214 0>, <215 0>, <216 0>,
+			<241 0>, <242 0>, <243 0>, <244 0>, <245 0>, <246 0>;
+	qcom,pmic-id = <0x10019 0x010011 0x0 0x0>;
+
+	aliases {
+		mmc0 = &sdhc_1;
+		mmc1 = &sdhc_2;
+	};
+
+	/* aboot fails the boot when it has nowhere to put bootargs */
+	chosen {
+	};
+
+	reserved-memory {
+		/* Where the msm-4.19 kernel and TWRP keep it, so TWRP reads it */
+		ramoops@b0000000 {
+			compatible = "ramoops";
+			reg = <0x0 0xb0000000 0x0 0x800000>;
+			record-size = <0x200000>;
+			console-size = <0x200000>;
+			pmsg-size = <0x200000>;
+		};
+	};
+
+	usb_vbus: extcon-usb-dummy {
+		compatible = "linux,extcon-usb-dummy";
+	};
+};
+
+&soc {
+	/* The restart reason aboot reads, as msm-4.19 writes it */
+	imem@8600000 {
+		compatible = "syscon", "simple-mfd";
+		reg = <0x08600000 0x1000>;
+
+		reboot-mode {
+			compatible = "syscon-reboot-mode";
+			offset = <0x65c>;
+			mode-normal = <0x77665501>;
+			mode-bootloader = <0x77665500>;
+			mode-recovery = <0x77665502>;
+		};
+	};
+};
+
+&sdc2_cmd_default {
+	drive-strength = <12>;
+};
+
+&sdc2_data_default {
+	drive-strength = <12>;
+};
+
+&sdhc_1 {
+	vmmc-supply = <&pm8937_l8>;
+	vqmmc-supply = <&pm8937_l5>;
+
+	status = "okay";
+};
+
+&sdhc_2 {
+	cd-gpios = <&tlmm 67 GPIO_ACTIVE_LOW>;
+	vmmc-supply = <&pm8937_l11>;
+	vqmmc-supply = <&pm8937_l12>;
+	pinctrl-0 = <&sdc2_default &sdc2_cd_default>;
+	pinctrl-1 = <&sdc2_sleep &sdc2_cd_default>;
+	pinctrl-names = "default", "sleep";
+
+	status = "okay";
+};
+
+&sleep_clk {
+	clock-frequency = <32768>;
+};
+
+&tlmm {
+	gpio-reserved-ranges = <0 4>, <20 4>;
+
+	sdc2_cd_default: sdc2-cd-default-state {
+		pins = "gpio67";
+		function = "gpio";
+		drive-strength = <2>;
+		bias-disable;
+	};
+};
+
+&usb {
+	dr_mode = "peripheral";
+	extcon = <&usb_vbus>;
+
+	status = "okay";
+};
+
+&usb_hs_phy {
+	vdd-supply = <&pm8937_l2>;
+	vdda1p8-supply = <&pm8937_l7>;
+	vdda3p3-supply = <&pm8937_l13>;
+
+	status = "okay";
+};
+
+&xo_board {
+	clock-frequency = <19200000>;
+};
+
+#include "msm8937-pantech-ef71-regulators.dtsi"
+#include "msm8937-pantech-ef71-input.dtsi"
