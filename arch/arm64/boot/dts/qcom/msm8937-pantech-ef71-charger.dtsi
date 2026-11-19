@@ -1,0 +1,35 @@
+// SPDX-License-Identifier: GPL-2.0-only
+/*
+ * EF71 charging: the battery, the PMI8950 fuel gauge and charger, and
+ * the wireless receiver and MAX14731 lines.
+ *
+ * Copyright (c) 2026, hiru <rlawoehd187@naver.com>
+ */
+
+#include <dt-bindings/gpio/gpio.h>
+
+/ {
+	/* 2950 mAh 4.4 V cell; msm-3.18 floats it at 4.42 V */
+	battery: battery {
+		compatible = "simple-battery";
+
+		charge-full-design-microamp-hours = <2950000>;
+		charge-term-current-microamp = <200000>;
+		constant-charge-current-max-microamp = <1800000>;
+		voltage-min-design-microvolt = <3400000>;
+		voltage-max-design-microvolt = <4400000>;
+	};
+};
+
+&pmi8950_fg {
+	monitored-battery = <&battery>;
+	power-supplies = <&pmi8950_smbcharger>;
+
+	status = "okay";
+};
+
+&pmi8950_smbcharger {
+	monitored-battery = <&battery>;
+
+	status = "okay";
+};

@@ -134,4 +134,5 @@
 #include "msm8937-pantech-ef71-cpu.dtsi"
 #include "msm8937-pantech-ef71-regulators.dtsi"
 #include "msm8937-pantech-ef71-display.dtsi"
+#include "msm8937-pantech-ef71-charger.dtsi"
 #include "msm8937-pantech-ef71-input.dtsi"
