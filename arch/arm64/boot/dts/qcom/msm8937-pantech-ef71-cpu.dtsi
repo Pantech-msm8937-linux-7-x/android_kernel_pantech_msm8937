@@ -1,0 +1,27 @@
+// SPDX-License-Identifier: GPL-2.0-only
+/*
+ * EF71 CPU frequency tables (an overclock to 1.4016 GHz on both
+ * clusters) and the APC rail the CPUs scale on.
+ *
+ * Copyright (c) 2026, hiru <rlawoehd187@naver.com>
+ */
+
+/*
+ * The CPU rates are rates of the cluster PLLs: the PLL tables list them too.
+ */
+
+/*
+ * aboot hands the clusters over on GPLL0 at 800 MHz: list it, so cpufreq
+ * does not have to move off it while the board comes up.
+ */
+&cpu_opp_table_c0 {
+	opp-800000000 {
+		opp-hz = /bits/ 64 <800000000>;
+	};
+};
+
+&cpu_opp_table_c1 {
+	opp-800000000 {
+		opp-hz = /bits/ 64 <800000000>;
+	};
+};
