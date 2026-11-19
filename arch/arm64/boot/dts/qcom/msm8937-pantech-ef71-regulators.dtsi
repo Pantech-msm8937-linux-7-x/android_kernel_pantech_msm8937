@@ -19,6 +19,16 @@
 	};
 };
 
+/* EF71S: ERM motor, driven at 3.596 V as msm-4.19 does */
+&pmi8950_haptics {
+	qcom,actuator-type = <HAP_TYPE_ERM>;
+	qcom,wave-shape = <HAP_WAVE_SQUARE>;
+	qcom,wave-play-rate-us = <5263>;
+	qcom,vmax-millivolt = <3596>;
+
+	status = "okay";
+};
+
 &pm8937_spmi_regulators {
 	/* APC */
 	pm8937_s5: s5 {

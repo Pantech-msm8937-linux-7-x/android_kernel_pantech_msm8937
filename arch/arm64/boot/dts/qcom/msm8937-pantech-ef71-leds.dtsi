@@ -1,0 +1,28 @@
+// SPDX-License-Identifier: GPL-2.0-only
+/*
+ * EF71 LEDs: the PMI8950 camera flash and the LP5523 behind the front
+ * indicator and key backlights.
+ *
+ * Copyright (c) 2026, hiru <rlawoehd187@naver.com>
+ */
+
+#include <dt-bindings/clock/qcom,gcc-msm8917.h>
+#include <dt-bindings/gpio/gpio.h>
+#include <dt-bindings/interrupt-controller/arm-gic.h>
+#include <dt-bindings/leds/common.h>
+
+&pmi8950_flash {
+	#address-cells = <1>;
+	#size-cells = <0>;
+
+	status = "okay";
+
+	led@0 {
+		reg = <0>;
+		function = LED_FUNCTION_FLASH;
+		color = <LED_COLOR_ID_WHITE>;
+		led-max-microamp = <200000>;
+		flash-max-microamp = <1000000>;
+		flash-max-timeout-us = <1280000>;
+	};
+};

@@ -8,6 +8,10 @@
 
 #include <dt-bindings/gpio/gpio.h>
 
+&gpu {
+	status = "okay";
+};
+
 &mdss {
 	status = "okay";
 };
