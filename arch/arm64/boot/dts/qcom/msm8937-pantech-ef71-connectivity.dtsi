@@ -20,6 +20,7 @@
 };
 
 &wcnss {
+	firmware-name = "image/wcnss.mdt";
 	vddpx-supply = <&pm8937_l5>;
 
 	status = "okay";
