@@ -458,7 +458,8 @@
 };
 
 &tlmm {
-	gpio-reserved-ranges = <0 4>, <20 4>;
+	/* GPIO 0 switches the front camera supply, as on msm-4.19 */
+	gpio-reserved-ranges = <1 3>, <20 4>;
 
 	gpio_keys_default: gpio-keys-default-state {
 		pins = "gpio126";
@@ -860,3 +861,5 @@
 		input-enable;
 	};
 };
+
+#include "msm8937-pantech-ef71-camera.dtsi"
