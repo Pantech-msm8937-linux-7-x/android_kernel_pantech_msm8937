@@ -142,7 +142,8 @@
 };
 
 &tlmm {
-	gpio-reserved-ranges = <0 4>, <20 4>;
+	/* GPIO 0 switches the front camera supply, as on msm-4.19 */
+	gpio-reserved-ranges = <1 3>, <20 4>;
 
 	sdc2_cd_default: sdc2-cd-default-state {
 		pins = "gpio67";
@@ -189,3 +190,4 @@
 #include "msm8937-pantech-ef71-leds.dtsi"
 #include "msm8937-pantech-ef71-input.dtsi"
 #include "msm8937-pantech-ef71-connectivity.dtsi"
+#include "msm8937-pantech-ef71-camera.dtsi"
