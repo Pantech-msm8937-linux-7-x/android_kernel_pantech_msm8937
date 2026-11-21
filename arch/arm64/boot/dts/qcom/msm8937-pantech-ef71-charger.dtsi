@@ -30,6 +30,8 @@
 
 &pmi8950_smbcharger {
 	monitored-battery = <&battery>;
+	/* A cable takes over from the wireless pad, as on the vendor software */
+	qcom,dc-yields-to-usb;
 
 	status = "okay";
 };
@@ -52,13 +54,13 @@
 
 	/*
 	 * The MAX14731 in front of USBIN and the DCIN of the BQ51221 wireless
-	 * receiver: the vendor driver holds OVP_EN_N, P-CONNECT and OTG_EN low
-	 * as outputs, without which the wireless input stays cut off.
+	 * receiver: the vendor driver holds OVP_EN_N and P-CONNECT low as
+	 * outputs, without which the wireless input stays cut off. OTG_EN goes
+	 * with the OTG VBUS regulator.
 	 */
 	max14731-ctrl-hog {
 		gpio-hog;
-		gpios = <8 GPIO_ACTIVE_HIGH>, <59 GPIO_ACTIVE_HIGH>,
-			<125 GPIO_ACTIVE_HIGH>;
+		gpios = <59 GPIO_ACTIVE_HIGH>, <125 GPIO_ACTIVE_HIGH>;
 		output-low;
 		line-name = "max14731-ctrl";
 	};
