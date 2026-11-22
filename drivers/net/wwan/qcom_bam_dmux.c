@@ -24,6 +24,13 @@
 #define BAM_DMUX_BUFFER_SIZE		SZ_2K
 #define BAM_DMUX_HDR_SIZE		sizeof(struct bam_dmux_hdr)
 #define BAM_DMUX_MAX_DATA_SIZE		(BAM_DMUX_BUFFER_SIZE - BAM_DMUX_HDR_SIZE)
+/*
+ * The receive buffers are large enough for the downlink MTU offered with the
+ * dynamic MTU signal of the open command, which the modem firmware of some
+ * devices (MSM8937) needs to aggregate the downlink (QMAP).
+ */
+#define BAM_DMUX_RX_BUFFER_SIZE		SZ_4K
+#define BAM_DMUX_MAX_RX_DATA_SIZE	(BAM_DMUX_RX_BUFFER_SIZE - BAM_DMUX_HDR_SIZE)
 #define BAM_DMUX_NUM_SKB		32
 
 #define BAM_DMUX_HDR_MAGIC		0x33fc
@@ -58,6 +65,17 @@ struct bam_dmux_hdr {
 	u16 len;
 };
 
+/*
+ * The signal of the open commands: the dynamic MTU, then the number of
+ * receive buffers (32 << n) and their size (2K << n) of the sender.
+ */
+#define BAM_DMUX_SIGNAL_DYNAMIC_MTU	BIT(1)
+#define BAM_DMUX_SIGNAL_RX_POOL_32	(0 << 4)
+#define BAM_DMUX_SIGNAL_RX_MTU_4K	(1 << 6)
+
+/* The length of a data command left to the size of the transfer */
+#define BAM_DMUX_LEN_OF_TRANSFER	0xffff
+
 struct bam_dmux_skb_dma {
 	struct bam_dmux *dmux;
 	struct sk_buff *skb;
@@ -83,6 +101,8 @@ struct bam_dmux {
 	struct work_struct tx_wakeup_work;
 
 	DECLARE_BITMAP(remote_channels, BAM_DMUX_NUM_CH);
+	/* The remote side announced the dynamic MTU in its open commands */
+	bool dynamic_mtu;
 	struct work_struct register_netdev_work;
 	struct net_device *netdevs[BAM_DMUX_NUM_CH];
 };
@@ -241,6 +261,10 @@ static int bam_dmux_send_cmd(struct bam_dmux_netdev *bndev, u8 cmd)
 	hdr->magic = BAM_DMUX_HDR_MAGIC;
 	hdr->cmd = cmd;
 	hdr->ch = bndev->ch;
+	if (cmd == BAM_DMUX_CMD_OPEN && dmux->dynamic_mtu)
+		hdr->signal = BAM_DMUX_SIGNAL_DYNAMIC_MTU |
+			      BAM_DMUX_SIGNAL_RX_POOL_32 |
+			      BAM_DMUX_SIGNAL_RX_MTU_4K;
 
 	skb_dma = bam_dmux_tx_queue(dmux, skb);
 	if (!skb_dma) {
@@ -486,11 +510,18 @@ static bool bam_dmux_skb_dma_submit_rx(struct bam_dmux_skb_dma *skb_dma)
 static bool bam_dmux_skb_dma_queue_rx(struct bam_dmux_skb_dma *skb_dma, gfp_t gfp)
 {
 	if (!skb_dma->skb) {
-		skb_dma->skb = __netdev_alloc_skb(NULL, BAM_DMUX_BUFFER_SIZE, gfp);
+		skb_dma->skb = __netdev_alloc_skb(NULL, BAM_DMUX_RX_BUFFER_SIZE, gfp);
 		if (!skb_dma->skb)
 			return false;
-		skb_put(skb_dma->skb, BAM_DMUX_BUFFER_SIZE);
+		skb_put(skb_dma->skb, BAM_DMUX_RX_BUFFER_SIZE);
 	}
+
+	/*
+	 * The transfer size is not known here: clear the buffer so that the
+	 * QMAP frames of a data command of unknown length end with an empty
+	 * QMAP header, where rmnet stops deaggregating.
+	 */
+	memset(skb_dma->skb->data, 0, BAM_DMUX_RX_BUFFER_SIZE);
 
 	return bam_dmux_skb_dma_map(skb_dma, DMA_FROM_DEVICE) &&
 	       bam_dmux_skb_dma_submit_rx(skb_dma);
@@ -508,9 +539,12 @@ static void bam_dmux_cmd_data(struct bam_dmux_skb_dma *skb_dma)
 		return;
 	}
 
-	if (hdr->len > BAM_DMUX_MAX_DATA_SIZE) {
+	if (hdr->len == BAM_DMUX_LEN_OF_TRANSFER)
+		hdr->len = BAM_DMUX_MAX_RX_DATA_SIZE;
+
+	if (hdr->len > BAM_DMUX_MAX_RX_DATA_SIZE) {
 		dev_err(dmux->dev, "Data larger than buffer? (%u > %u)\n",
-			hdr->len, (u16)BAM_DMUX_MAX_DATA_SIZE);
+			hdr->len, (u16)BAM_DMUX_MAX_RX_DATA_SIZE);
 		return;
 	}
 
@@ -540,7 +574,10 @@ static void bam_dmux_cmd_open(struct bam_dmux *dmux, struct bam_dmux_hdr *hdr)
 {
 	struct net_device *netdev = dmux->netdevs[hdr->ch];
 
-	dev_dbg(dmux->dev, "open channel: %u\n", hdr->ch);
+	dev_dbg(dmux->dev, "open channel: %u (signal %#x)\n", hdr->ch, hdr->signal);
+
+	if (hdr->signal & BAM_DMUX_SIGNAL_DYNAMIC_MTU)
+		dmux->dynamic_mtu = true;
 
 	if (__test_and_set_bit(hdr->ch, dmux->remote_channels)) {
 		dev_warn(dmux->dev, "Channel already open: %u\n", hdr->ch);
@@ -615,7 +652,7 @@ static bool bam_dmux_power_on(struct bam_dmux *dmux)
 	struct device *dev = dmux->dev;
 	struct dma_slave_config dma_rx_conf = {
 		.direction = DMA_DEV_TO_MEM,
-		.src_maxburst = BAM_DMUX_BUFFER_SIZE,
+		.src_maxburst = BAM_DMUX_RX_BUFFER_SIZE,
 	};
 	int i;
 
