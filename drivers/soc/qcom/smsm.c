@@ -566,6 +566,13 @@ static int qcom_smsm_probe(struct platform_device *pdev)
 		if (!ret)
 			continue;
 
+		/*
+		 * The mailbox may only be late: without it the host would
+		 * silently never get kicked.
+		 */
+		if (ret == -EPROBE_DEFER)
+			goto out_put;
+
 		ret = smsm_parse_ipc(smsm, id);
 		if (ret < 0)
 			goto out_put;
