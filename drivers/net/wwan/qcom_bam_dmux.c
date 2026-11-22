@@ -21,6 +21,14 @@
 #include <linux/workqueue.h>
 #include <net/pkt_sched.h>
 
+/*
+ * Present the channels as the downstream rmnet_bam driver did, for the
+ * Qualcomm userspace (netmgrd): rmnetN devices taking its private ioctls.
+ */
+static bool rmnet_bam;
+module_param(rmnet_bam, bool, 0444);
+MODULE_PARM_DESC(rmnet_bam, "Name the devices rmnetN and take the ioctls of rmnet_bam");
+
 #define BAM_DMUX_BUFFER_SIZE		SZ_2K
 #define BAM_DMUX_HDR_SIZE		sizeof(struct bam_dmux_hdr)
 #define BAM_DMUX_MAX_DATA_SIZE		(BAM_DMUX_BUFFER_SIZE - BAM_DMUX_HDR_SIZE)
@@ -110,7 +118,59 @@ struct bam_dmux {
 struct bam_dmux_netdev {
 	struct bam_dmux *dmux;
 	u8 ch;
+	/* rmnet_bam: its operation mode, BAM_DMUX_MODE_* */
+	u32 opmode;
 };
+
+/*
+ * rmnet_bam: the private ioctls of the downstream rmnet_bam driver,
+ * which netmgrd configures the devices with (uapi/linux/msm_rmnet.h there).
+ * The devices are raw IP only; with the QoS mode on, the packets sent start
+ * with a QMI QoS header carrying their mark as the flow.
+ */
+#define BAM_DMUX_MODE_LLP_ETH		0x01
+#define BAM_DMUX_MODE_LLP_IP		0x02
+#define BAM_DMUX_MODE_QOS		0x04
+
+#define RMNET_IOCTL_SET_LLP_ETHERNET	0x89f1
+#define RMNET_IOCTL_SET_LLP_IP		0x89f2
+#define RMNET_IOCTL_GET_LLP		0x89f3
+#define RMNET_IOCTL_SET_QOS_ENABLE	0x89f4
+#define RMNET_IOCTL_SET_QOS_DISABLE	0x89f5
+#define RMNET_IOCTL_GET_QOS		0x89f6
+#define RMNET_IOCTL_GET_OPMODE		0x89f7
+#define RMNET_IOCTL_OPEN		0x89f8
+#define RMNET_IOCTL_CLOSE		0x89f9
+#define RMNET_IOCTL_FLOW_ENABLE		0x89fa
+#define RMNET_IOCTL_FLOW_DISABLE	0x89fb
+#define RMNET_IOCTL_FLOW_SET_HNDL	0x89fc
+#define RMNET_IOCTL_EXTENDED		0x89fd
+
+#define RMNET_IOCTL_GET_SUPPORTED_FEATURES	0x00
+#define RMNET_IOCTL_SET_MRU			0x01
+#define RMNET_IOCTL_GET_MRU			0x02
+#define RMNET_IOCTL_GET_EPID			0x03
+#define RMNET_IOCTL_GET_DRIVER_NAME		0x04
+#define RMNET_IOCTL_DEREGISTER_DEV		0x16
+
+struct rmnet_ioctl_extended {
+	u32 extended_ioctl;
+	union {
+		u32 data;
+		char if_name[IFNAMSIZ];
+		u8 pad[28];
+	} u;
+};
+
+struct rmnet_ioctl_data {
+	u32 data;
+};
+
+struct qmi_qos_hdr {
+	u8 version;
+	u8 flags;
+	u32 flow_id;
+} __packed;
 
 static void bam_dmux_pc_vote(struct bam_dmux *dmux, bool enable)
 {
@@ -369,6 +429,17 @@ static netdev_tx_t bam_dmux_netdev_start_xmit(struct sk_buff *skb,
 	if (active < 0 && active != -EINPROGRESS)
 		goto drop;
 
+	if (bndev->opmode & BAM_DMUX_MODE_QOS) {
+		struct qmi_qos_hdr *qos;
+
+		if (skb_cow_head(skb, sizeof(*qos)))
+			goto drop;
+		qos = skb_push(skb, sizeof(*qos));
+		qos->version = 1;
+		qos->flags = 0;
+		qos->flow_id = skb->mark;
+	}
+
 	ret = bam_dmux_tx_prepare_skb(bndev, skb);
 	if (ret)
 		goto drop;
@@ -422,10 +493,85 @@ out:
 	pm_runtime_put_autosuspend(dmux->dev);
 }
 
+static int bam_dmux_netdev_ioctl_extended(struct bam_dmux_netdev *bndev,
+					  void __user *data)
+{
+	struct rmnet_ioctl_extended ext;
+
+	if (copy_from_user(&ext, data, sizeof(ext)))
+		return -EFAULT;
+
+	switch (ext.extended_ioctl) {
+	case RMNET_IOCTL_SET_MRU:
+	case RMNET_IOCTL_DEREGISTER_DEV:
+		break;
+	case RMNET_IOCTL_GET_EPID:
+		ext.u.data = bndev->ch;
+		break;
+	case RMNET_IOCTL_GET_SUPPORTED_FEATURES:
+		ext.u.data = 0;
+		break;
+	case RMNET_IOCTL_GET_DRIVER_NAME:
+		strscpy(ext.u.if_name, "rmnet_bam", sizeof(ext.u.if_name));
+		break;
+	default:
+		return -EINVAL;
+	}
+
+	return copy_to_user(data, &ext, sizeof(ext)) ? -EFAULT : 0;
+}
+
+static int bam_dmux_netdev_siocdevprivate(struct net_device *netdev,
+					  struct ifreq *ifr,
+					  void __user *data, int cmd)
+{
+	struct bam_dmux_netdev *bndev = netdev_priv(netdev);
+	struct rmnet_ioctl_data val = {};
+
+	if (!rmnet_bam)
+		return -EOPNOTSUPP;
+
+	switch (cmd) {
+	case RMNET_IOCTL_SET_LLP_IP:
+	case RMNET_IOCTL_OPEN:
+	case RMNET_IOCTL_CLOSE:
+	case RMNET_IOCTL_FLOW_ENABLE:
+	case RMNET_IOCTL_FLOW_DISABLE:
+	case RMNET_IOCTL_FLOW_SET_HNDL:
+		return 0;
+	case RMNET_IOCTL_SET_LLP_ETHERNET:
+		/* raw IP only */
+		return -EINVAL;
+	case RMNET_IOCTL_SET_QOS_ENABLE:
+		bndev->opmode |= BAM_DMUX_MODE_QOS;
+		return 0;
+	case RMNET_IOCTL_SET_QOS_DISABLE:
+		bndev->opmode &= ~BAM_DMUX_MODE_QOS;
+		return 0;
+	case RMNET_IOCTL_GET_LLP:
+		val.data = bndev->opmode & (BAM_DMUX_MODE_LLP_ETH |
+					    BAM_DMUX_MODE_LLP_IP);
+		break;
+	case RMNET_IOCTL_GET_QOS:
+		val.data = bndev->opmode & BAM_DMUX_MODE_QOS;
+		break;
+	case RMNET_IOCTL_GET_OPMODE:
+		val.data = bndev->opmode;
+		break;
+	case RMNET_IOCTL_EXTENDED:
+		return bam_dmux_netdev_ioctl_extended(bndev, data);
+	default:
+		return -EOPNOTSUPP;
+	}
+
+	return copy_to_user(data, &val, sizeof(val)) ? -EFAULT : 0;
+}
+
 static const struct net_device_ops bam_dmux_ops = {
 	.ndo_open	= bam_dmux_netdev_open,
 	.ndo_stop	= bam_dmux_netdev_stop,
 	.ndo_start_xmit	= bam_dmux_netdev_start_xmit,
+	.ndo_siocdevprivate = bam_dmux_netdev_siocdevprivate,
 };
 
 static const struct device_type wwan_type = {
@@ -462,8 +608,9 @@ static void bam_dmux_register_netdev_work(struct work_struct *work)
 		if (dmux->netdevs[ch])
 			continue;
 
-		netdev = alloc_netdev(sizeof(*bndev), "wwan%d", NET_NAME_ENUM,
-				      bam_dmux_netdev_setup);
+		netdev = alloc_netdev(sizeof(*bndev),
+				      rmnet_bam ? "rmnet%d" : "wwan%d",
+				      NET_NAME_ENUM, bam_dmux_netdev_setup);
 		if (!netdev)
 			return;
 
@@ -473,6 +620,9 @@ static void bam_dmux_register_netdev_work(struct work_struct *work)
 		bndev = netdev_priv(netdev);
 		bndev->dmux = dmux;
 		bndev->ch = ch;
+		bndev->opmode = BAM_DMUX_MODE_LLP_IP;
+		if (rmnet_bam)
+			netdev->needed_headroom += sizeof(struct qmi_qos_hdr);
 
 		ret = register_netdev(netdev);
 		if (ret) {
