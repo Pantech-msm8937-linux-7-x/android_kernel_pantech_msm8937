@@ -137,20 +137,222 @@
 };
 
 /*
- * aboot hands the clusters over on GPLL0 at 800 MHz: list it, so cpufreq
- * does not have to move off it while the board comes up.
+ * The CPU rates are rates of the cluster PLLs: the PLL tables list them too.
  */
 &cpu_opp_table_c0 {
-	opp-800000000 {
-		opp-hz = /bits/ 64 <800000000>;
+	/*
+	 * Ten steps from the lowest rate of the PLL to 1.4016 GHz. Above the
+	 * stock 1.0944 GHz this is an overclock, as the vendor 4.19 kernel ran it,
+	 * at voltages found stable under load (1.4016 GHz failed at 1.285 V); it
+	 * needs the mem-acc init values of the SoC.
+	 */
+	/delete-node/ opp-768000000;
+	/delete-node/ opp-902400000;
+	/delete-node/ opp-998400000;
+	/delete-node/ opp-1094400000;
+
+	opp-614400000 {
+		opp-hz = /bits/ 64 <614400000>;
+		opp-microvolt = <1225000 1225000 1350000>;
+	};
+	opp-710400000 {
+		opp-hz = /bits/ 64 <710400000>;
+		opp-microvolt = <1225000 1225000 1350000>;
+	};
+	opp-787200000 {
+		opp-hz = /bits/ 64 <787200000>;
+		opp-microvolt = <1225000 1225000 1350000>;
+	};
+	opp-883200000 {
+		opp-hz = /bits/ 64 <883200000>;
+		opp-microvolt = <1225000 1225000 1350000>;
+	};
+	opp-960000000 {
+		opp-hz = /bits/ 64 <960000000>;
+		opp-microvolt = <1225000 1225000 1350000>;
+	};
+	opp-1056000000 {
+		opp-hz = /bits/ 64 <1056000000>;
+		opp-microvolt = <1225000 1225000 1350000>;
+	};
+	opp-1132800000 {
+		opp-hz = /bits/ 64 <1132800000>;
+		opp-microvolt = <1250000 1250000 1350000>;
+	};
+	opp-1228800000 {
+		opp-hz = /bits/ 64 <1228800000>;
+		opp-microvolt = <1300000 1300000 1350000>;
+	};
+	opp-1305600000 {
+		opp-hz = /bits/ 64 <1305600000>;
+		opp-microvolt = <1300000 1300000 1350000>;
+	};
+	opp-1401600000 {
+		opp-hz = /bits/ 64 <1401600000>;
+		opp-microvolt = <1300000 1300000 1350000>;
 	};
 };
 
 &cpu_opp_table_c1 {
-	opp-800000000 {
-		opp-hz = /bits/ 64 <800000000>;
+	/*
+	 * Ten steps from 595.2 MHz to 1.4016 GHz, which the cluster does not go
+	 * past whatever the PLL runs at (speed bin 0).
+	 */
+	/delete-node/ opp-960000000;
+	/delete-node/ opp-1094400000;
+	/delete-node/ opp-1209600000;
+	/delete-node/ opp-1248000000;
+	/delete-node/ opp-1344000000;
+	/delete-node/ opp-1401600000;
+
+	opp-595200000 {
+		opp-hz = /bits/ 64 <595200000>;
+		opp-microvolt = <1225000 1225000 1350000>;
+	};
+	opp-691200000 {
+		opp-hz = /bits/ 64 <691200000>;
+		opp-microvolt = <1225000 1225000 1350000>;
+	};
+	opp-768000000 {
+		opp-hz = /bits/ 64 <768000000>;
+		opp-microvolt = <1225000 1225000 1350000>;
+	};
+	opp-864000000 {
+		opp-hz = /bits/ 64 <864000000>;
+		opp-microvolt = <1225000 1225000 1350000>;
+	};
+	opp-960000000 {
+		opp-hz = /bits/ 64 <960000000>;
+		opp-microvolt = <1225000 1225000 1350000>;
+	};
+	opp-1036800000 {
+		opp-hz = /bits/ 64 <1036800000>;
+		opp-microvolt = <1225000 1225000 1350000>;
+	};
+	opp-1132800000 {
+		opp-hz = /bits/ 64 <1132800000>;
+		opp-microvolt = <1225000 1225000 1350000>;
+	};
+	opp-1228800000 {
+		opp-hz = /bits/ 64 <1228800000>;
+		opp-microvolt = <1225000 1225000 1350000>;
+	};
+	opp-1305600000 {
+		opp-hz = /bits/ 64 <1305600000>;
+		opp-microvolt = <1225000 1225000 1350000>;
+	};
+	opp-1401600000 {
+		opp-hz = /bits/ 64 <1401600000>;
+		opp-microvolt = <1225000 1225000 1350000>;
 	};
 };
+
+&pll_opp_table_c0 {
+	/delete-node/ opp-768000000;
+	/delete-node/ opp-902400000;
+	/delete-node/ opp-998400000;
+	/delete-node/ opp-1094400000;
+
+	opp-614400000 {
+		opp-hz = /bits/ 64 <614400000>;
+	};
+
+	opp-710400000 {
+		opp-hz = /bits/ 64 <710400000>;
+	};
+
+	opp-787200000 {
+		opp-hz = /bits/ 64 <787200000>;
+	};
+
+	opp-883200000 {
+		opp-hz = /bits/ 64 <883200000>;
+	};
+
+	opp-960000000 {
+		opp-hz = /bits/ 64 <960000000>;
+	};
+
+	opp-1056000000 {
+		opp-hz = /bits/ 64 <1056000000>;
+	};
+
+	opp-1132800000 {
+		opp-hz = /bits/ 64 <1132800000>;
+	};
+
+	opp-1228800000 {
+		opp-hz = /bits/ 64 <1228800000>;
+	};
+
+	opp-1305600000 {
+		opp-hz = /bits/ 64 <1305600000>;
+	};
+
+	opp-1401600000 {
+		opp-hz = /bits/ 64 <1401600000>;
+	};
+};
+
+&pll_opp_table_c1 {
+	/delete-node/ opp-960000000;
+	/delete-node/ opp-1094400000;
+	/delete-node/ opp-1209600000;
+	/delete-node/ opp-1248000000;
+	/delete-node/ opp-1344000000;
+	/delete-node/ opp-1401600000;
+
+	opp-595200000 {
+		opp-hz = /bits/ 64 <595200000>;
+	};
+
+	opp-691200000 {
+		opp-hz = /bits/ 64 <691200000>;
+	};
+
+	opp-768000000 {
+		opp-hz = /bits/ 64 <768000000>;
+	};
+
+	opp-864000000 {
+		opp-hz = /bits/ 64 <864000000>;
+	};
+
+	opp-960000000 {
+		opp-hz = /bits/ 64 <960000000>;
+	};
+
+	opp-1036800000 {
+		opp-hz = /bits/ 64 <1036800000>;
+	};
+
+	opp-1132800000 {
+		opp-hz = /bits/ 64 <1132800000>;
+	};
+
+	opp-1228800000 {
+		opp-hz = /bits/ 64 <1228800000>;
+	};
+
+	opp-1305600000 {
+		opp-hz = /bits/ 64 <1305600000>;
+	};
+
+	opp-1401600000 {
+		opp-hz = /bits/ 64 <1401600000>;
+	};
+};
+
+
+/* The APC rail, which cpufreq raises for the overclocked frequencies */
+&cpu0 { cpu-supply = <&pm8937_s5>; };
+&cpu1 { cpu-supply = <&pm8937_s5>; };
+&cpu2 { cpu-supply = <&pm8937_s5>; };
+&cpu3 { cpu-supply = <&pm8937_s5>; };
+&cpu4 { cpu-supply = <&pm8937_s5>; };
+&cpu5 { cpu-supply = <&pm8937_s5>; };
+&cpu6 { cpu-supply = <&pm8937_s5>; };
+&cpu7 { cpu-supply = <&pm8937_s5>; };
 
 &blsp1_i2c3 {
 	status = "okay";
