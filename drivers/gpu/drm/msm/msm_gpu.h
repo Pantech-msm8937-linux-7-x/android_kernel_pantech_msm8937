@@ -238,6 +238,12 @@ struct msm_gpu {
 #define DRM_MSM_HANGCHECK_PROGRESS_RETRIES 3
 	struct timer_list hangcheck_timer;
 
+	/*
+	 * How many more hangcheck periods progress() can give a submit, if not
+	 * DRM_MSM_HANGCHECK_PROGRESS_RETRIES
+	 */
+	unsigned int hangcheck_progress_retries_max;
+
 	/* work for handling GPU recovery: */
 	struct kthread_work recover_work;
 

@@ -1691,6 +1691,34 @@ static u64 a5xx_gpu_busy(struct msm_gpu *gpu, unsigned long *out_sample_rate)
 	return busy_cycles;
 }
 
+/*
+ * A long compute dispatch is one packet: the CP does not move while the
+ * shaders run. Busy cycles going up are progress too, so that seconds long
+ * dispatches are not taken for hangs (a hang with the GPU not busy is still
+ * found at once, a shader that never ends after the retries).
+ */
+static bool a5xx_progress(struct msm_gpu *gpu, struct msm_ringbuffer *ring)
+{
+	struct adreno_gpu *adreno_gpu = to_adreno_gpu(gpu);
+	struct a5xx_gpu *a5xx_gpu = to_a5xx_gpu(adreno_gpu);
+	struct msm_cp_state cp_state = {
+		.ib1_base = gpu_read64(gpu, REG_A5XX_CP_IB1_BASE),
+		.ib2_base = gpu_read64(gpu, REG_A5XX_CP_IB2_BASE),
+		.ib1_rem  = gpu_read(gpu, REG_A5XX_CP_IB1_BUFSZ),
+		.ib2_rem  = gpu_read(gpu, REG_A5XX_CP_IB2_BUFSZ),
+	};
+	u64 busy = gpu_read64(gpu, REG_A5XX_RBBM_PERFCTR_RBBM_0_LO);
+	bool progress;
+
+	progress = memcmp(&cp_state, &ring->last_cp_state, sizeof(cp_state)) ||
+		   busy != a5xx_gpu->progress_busy;
+
+	ring->last_cp_state = cp_state;
+	a5xx_gpu->progress_busy = busy;
+
+	return progress;
+}
+
 static uint32_t a5xx_get_rptr(struct msm_gpu *gpu, struct msm_ringbuffer *ring)
 {
 	struct adreno_gpu *adreno_gpu = to_adreno_gpu(gpu);
@@ -1781,6 +1809,12 @@ static struct msm_gpu *a5xx_gpu_init(struct drm_device *dev)
 	/* Set up the preemption specific bits and pieces for each ringbuffer */
 	a5xx_preempt_init(gpu);
 
+	/*
+	 * ~5 s for a submit that keeps the GPU busy, see a5xx_progress() (the
+	 * hangcheck timer is rounded up to whole seconds)
+	 */
+	gpu->hangcheck_progress_retries_max = 5;
+
 	/* Inherit the common config and make some necessary fixups */
 	adreno_gpu->ubwc_config = qcom_ubwc_config_get_data();
 	if (IS_ERR(adreno_gpu->ubwc_config))
@@ -1802,6 +1836,7 @@ const struct adreno_gpu_funcs a5xx_gpu_funcs = {
 		.recover = a5xx_recover,
 		.submit = a5xx_submit,
 		.active_ring = a5xx_active_ring,
+		.progress = a5xx_progress,
 		.irq = a5xx_irq,
 		.destroy = a5xx_destroy,
 #if defined(CONFIG_DEBUG_FS) || defined(CONFIG_DEV_COREDUMP)
