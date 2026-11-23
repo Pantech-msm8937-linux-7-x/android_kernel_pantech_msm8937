@@ -615,6 +615,12 @@
 		#address-cells = <1>;
 		#size-cells = <1>;
 
+		mem-acc@1942130 {
+			compatible = "qcom,msm8937-mem-acc";
+			reg = <0x01942138 0x4>, <0x01942130 0x4>, <0x01946004 0x4>;
+			qcom,init-values = <0xff 0x5555 0x55>;
+		};
+
 		qfprom: qfprom@a4000 {
 			compatible = "qcom,msm8937-qfprom", "qcom,qfprom";
 			reg = <0x000a4000 0x3000>;
