@@ -43,6 +43,10 @@
 
 &blsp1_i2c3 {
 	status = "okay";
+	/* 400 kHz as the stock kernel (100 kHz without it): the touchscreen
+	 * reports are read four times as fast
+	 */
+	clock-frequency = <400000>;
 
 	/* EF71S: Atmel mXT641T; the EF71AS has an FT8716 on the same pins */
 	touchscreen@4a {

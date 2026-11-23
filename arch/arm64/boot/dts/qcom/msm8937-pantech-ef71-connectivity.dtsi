@@ -47,6 +47,7 @@
  */
 &blsp2_i2c1 {
 	status = "okay";
+	clock-frequency = <400000>;
 
 	nfc@28 {
 		compatible = "qcom,nq-nci";
