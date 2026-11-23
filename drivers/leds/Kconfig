@@ -479,6 +479,16 @@ config LEDS_LP5523
 	  Driver provides direct control via LED class and interface for
 	  programming the engines.
 
+config LEDS_LP5523_PANTECH
+	tristate "Pantech LP5523 LED driver"
+	depends on I2C && LEDS_CLASS
+	help
+	  Pantech's own driver for the LP5523 that drives the notification
+	  LEDs and the key backlights of the EF71, as on the stock kernel: the
+	  brightness of channel 8 is a command (dimming, blinking, timed
+	  patterns, the charging and booting patterns). Not the upstream
+	  LEDS_LP5523.
+
 config LEDS_LP5562
 	tristate "LED Support for TI LP5562 LED driver chip"
 	depends on LEDS_CLASS && I2C

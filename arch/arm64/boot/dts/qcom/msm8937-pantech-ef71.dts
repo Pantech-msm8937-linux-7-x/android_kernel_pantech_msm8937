@@ -513,79 +513,21 @@
 		#address-cells = <1>;
 		#size-cells = <0>;
 
+		/*
+		 * The front indicator (a left and a right RGB LED) and the menu
+		 * and back key backlights, on Pantech's driver as on the stock
+		 * kernel: channel 8 takes the commands.
+		 */
 		led-controller@32 {
-			compatible = "national,lp5523";
+			compatible = "ti,lp5523_led_driver";
 			reg = <0x32>;
-			clock-mode = /bits/ 8 <1>;
 			enable-gpios = <&tlmm 129 GPIO_ACTIVE_HIGH>;
 			pinctrl-0 = <&lp5523_en_default>;
 			pinctrl-names = "default";
-			#address-cells = <1>;
-			#size-cells = <0>;
-
-			led@0 {
-				reg = <0>;
-				chan-name = "lp5523:channel0";
-				color = <LED_COLOR_ID_GREEN>;
-				led-cur = /bits/ 8 <40>;
-				max-cur = /bits/ 8 <250>;
-			};
-
-			led@1 {
-				reg = <1>;
-				chan-name = "lp5523:channel1";
-				color = <LED_COLOR_ID_BLUE>;
-				led-cur = /bits/ 8 <40>;
-				max-cur = /bits/ 8 <250>;
-			};
-
-			led@2 {
-				reg = <2>;
-				chan-name = "lp5523:channel2";
-				color = <LED_COLOR_ID_GREEN>;
-				led-cur = /bits/ 8 <40>;
-				max-cur = /bits/ 8 <250>;
-			};
-
-			led@3 {
-				reg = <3>;
-				chan-name = "lp5523:channel3";
-				color = <LED_COLOR_ID_BLUE>;
-				led-cur = /bits/ 8 <40>;
-				max-cur = /bits/ 8 <250>;
-			};
-
-			led@4 {
-				reg = <4>;
-				chan-name = "lp5523:channel4";
-				color = <LED_COLOR_ID_WHITE>;
-				led-cur = /bits/ 8 <40>;
-				max-cur = /bits/ 8 <250>;
-			};
-
-			led@5 {
-				reg = <5>;
-				chan-name = "lp5523:channel5";
-				color = <LED_COLOR_ID_WHITE>;
-				led-cur = /bits/ 8 <40>;
-				max-cur = /bits/ 8 <250>;
-			};
-
-			led@6 {
-				reg = <6>;
-				chan-name = "lp5523:channel6";
-				color = <LED_COLOR_ID_RED>;
-				led-cur = /bits/ 8 <40>;
-				max-cur = /bits/ 8 <250>;
-			};
-
-			led@7 {
-				reg = <7>;
-				chan-name = "lp5523:channel7";
-				color = <LED_COLOR_ID_RED>;
-				led-cur = /bits/ 8 <40>;
-				max-cur = /bits/ 8 <250>;
-			};
+			lp5523,clock_mode = <1>;
+			lp5523,max_chan = <9>;
+			lp5523,led_current = <40>;
+			lp5523,max_current = <250>;
 		};
 	};
 };
