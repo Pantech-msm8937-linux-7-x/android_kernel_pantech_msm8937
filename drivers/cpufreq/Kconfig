@@ -204,6 +204,24 @@ config CPU_FREQ_GOV_SCHEDUTIL
 
 comment "CPU frequency scaling drivers"
 
+config CPU_INPUT_BOOST
+	tristate "Raise the CPU minimum frequencies on input"
+	depends on INPUT
+	help
+	  When the user touches the screen or presses a key, raise the minimum
+	  frequency of the CPUs for a while (the input boost of the Qualcomm
+	  kernels), through the frequency QoS of the policies.
+
+config CPU_INPUT_BOOST_FREQ
+	string "Boosted minimums, as cpu:kHz pairs"
+	depends on CPU_INPUT_BOOST
+	default ""
+
+config CPU_INPUT_BOOST_MS
+	int "How long a boost lasts after the last input, in ms"
+	depends on CPU_INPUT_BOOST
+	default 100
+
 config CPUFREQ_DT
 	tristate "Generic DT based cpufreq driver"
 	depends on HAVE_CLK && OF
