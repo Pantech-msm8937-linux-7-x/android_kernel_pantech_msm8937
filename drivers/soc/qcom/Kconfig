@@ -226,6 +226,14 @@ config QCOM_SOCINFO
 	 Say yes here to support the Qualcomm socinfo driver, providing
 	 information about the SoC to user space.
 
+config QCOM_MEM_ACC_INIT
+	bool "Qualcomm MSM8937 memory accelerator init values"
+	depends on ARCH_QCOM || COMPILE_TEST
+	help
+	  Writes the boot values of the memory accelerator (SRAM assist) of
+	  the CPU rail of MSM8937, as the vendor mem-acc regulator does. Without
+	  them the CPU caches corrupt data at the higher CPU clocks.
+
 config QCOM_SPM
 	tristate "Qualcomm Subsystem Power Manager (SPM)"
 	depends on QCOM_SCM
