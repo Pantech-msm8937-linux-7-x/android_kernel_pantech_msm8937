@@ -154,6 +154,10 @@
 
 &blsp1_i2c3 {
 	status = "okay";
+	/* 400 kHz as the stock kernel (100 kHz without it): the touchscreen
+	 * reports are read four times as fast
+	 */
+	clock-frequency = <400000>;
 
 	/* EF71S: Atmel mXT641T; the EF71AS has an FT8716 on the same pins */
 	touchscreen@4a {
@@ -496,6 +500,7 @@
 &soc {
 	blsp2_i2c4: i2c@7af8000 {
 		compatible = "qcom,i2c-qup-v2.2.1";
+		clock-frequency = <400000>;
 		reg = <0x07af8000 0x600>;
 		interrupts = <GIC_SPI 302 IRQ_TYPE_LEVEL_HIGH>;
 		clocks = <&gcc MSM8937_GCC_BLSP2_QUP4_I2C_APPS_CLK>,
@@ -903,6 +908,7 @@
  */
 &blsp2_i2c1 {
 	status = "okay";
+	clock-frequency = <400000>;
 
 	nfc@28 {
 		compatible = "qcom,nq-nci";
