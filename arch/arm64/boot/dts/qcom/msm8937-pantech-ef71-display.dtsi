@@ -16,6 +16,19 @@
  */
 &gpu_opp_table {
 	/delete-node/ opp-19200000;
+
+	/*
+	 * Above the 450 MHz of the stock kernel, at the same voltage: until
+	 * GPLL3 got its post divider this was what 450 MHz ran at, through
+	 * all of the Vulkan conformance runs.
+	 */
+	opp-525000000 {
+		opp-hz = /bits/ 64 <525000000>;
+		opp-supported-hw = <0xff>;
+		/* the top of the stock GPU bus table */
+		opp-peak-kBps = <7372800>;
+		required-opps = <&rpmpd_opp_turbo>;
+	};
 };
 
 &mdss {
