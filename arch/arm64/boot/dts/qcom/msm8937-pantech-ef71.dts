@@ -1053,6 +1053,15 @@
 
 				#sound-dai-cells = <1>;
 
+				/*
+				 * Headset jack: the HPHL and GND switches are
+				 * normally open, the button thresholds are those
+				 * of the stock MBHC calibration.
+				 */
+				qcom,mbhc-buttons-vthreshold-microvolt =
+					<75000 150000 237000 450000
+					 450000 450000 450000 450000>;
+
 				vdd-buck-supply = <&wcd_eldo2>;
 				vdd-buck-sido-supply = <&wcd_eldo2>;
 				vdd-tx-supply = <&pm8937_l5>;
