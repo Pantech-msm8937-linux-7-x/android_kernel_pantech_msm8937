@@ -55,6 +55,13 @@ properties:
     description: A phandle to the OPP table containing the performance states.
     $ref: /schemas/types.yaml#/definitions/phandle
 
+  interconnects:
+    maxItems: 1
+
+  interconnect-names:
+    items:
+      - const: usb-ddr
+
   phy-select:
     description:
       Phandler of TCSR node with two argument that indicate register
