@@ -975,6 +975,10 @@ static const struct freq_tbl ftbl_gfx3d_clk_src_msm8937[] = {
 	F(375000000, P_GPLL3, 1, 0, 0),
 	F(400000000, P_GPLL0, 2, 0, 0),
 	F(450000000, P_GPLL3, 1, 0, 0),
+	/* GPLL3 at 1050 MHz, at the top of its VCO: for boards that run the
+	 * GPU above the 450 MHz of the stock kernel
+	 */
+	F(525000000, P_GPLL3, 1, 0, 0),
 	{ }
 };
 
