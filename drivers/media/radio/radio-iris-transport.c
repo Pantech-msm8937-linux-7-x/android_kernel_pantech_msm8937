@@ -25,8 +25,8 @@ struct radio_data {
 	struct radio_hci_dev *hdev;
 	struct tasklet_struct   rx_task;
 	struct rpmsg_endpoint  *fm_channel;
-	unsigned  char *data;
-	int length;
+	/* frames from the rpmsg callback, for the rx tasklet */
+	struct sk_buff_head rx_q;
 };
 struct radio_data hs;
 static int fmsmd_set;
@@ -43,26 +43,20 @@ static void radio_hci_smd_destruct(struct radio_hci_dev *hdev)
 }
 
 
+/*
+ * The frames are queued by the callback and taken in order here: a single
+ * buffer for the last one made frames arriving together overwrite each
+ * other, be lost and be freed twice.
+ */
 static void radio_hci_smd_recv_event(unsigned long temp)
 {
-	int len;
-	int rc;
 	struct sk_buff *skb;
-	unsigned  char *buf;
-	FMDBG("smd_recv event: is called\n");
-	len = hs.length;
-	buf = hs.data;
-	skb = alloc_skb(len, GFP_ATOMIC);
-	if (!skb) {
-		FMDERR("Memory not allocated for the socket\n");
-		return;
-	}
 
-	memcpy(skb_put(skb, len), buf, len);
-	skb_orphan(skb);
-	skb->dev = (struct net_device   *)hs.hdev;
-	rc = radio_hci_recv_frame(skb);
-	kfree(buf);
+	FMDBG("smd_recv event: is called\n");
+	while ((skb = skb_dequeue(&hs.rx_q))) {
+		skb->dev = (struct net_device *)hs.hdev;
+		radio_hci_recv_frame(skb);
+	}
 }
 
 static int radio_hci_smd_send_frame(struct sk_buff *skb)
@@ -117,6 +111,7 @@ static int radio_hci_smd_register_dev(struct radio_data *hsmd)
 	if (hdev == NULL)
 		return -ENODEV;
 
+	skb_queue_head_init(&hsmd->rx_q);
 	tasklet_init(&hsmd->rx_task, radio_hci_smd_recv_event,
 				(unsigned long) hsmd);
 	hdev->send = radio_hci_smd_send_frame;
@@ -137,6 +132,9 @@ static void radio_hci_smd_deregister(void)
 {
 	FM_INFO("smd_deregister: is called\n");
 	radio_hci_unregister_dev();
+	/* no frame is to be handed to the device being freed */
+	tasklet_kill(&hs.rx_task);
+	skb_queue_purge(&hs.rx_q);
 	kfree(hs.hdev);
 	hs.hdev = NULL;
 	hs.fm_channel = 0;
@@ -147,19 +145,21 @@ static void radio_hci_smd_deregister(void)
 static int qcom_smd_fm_callback(struct rpmsg_device *rpdev,
 			void *data, int len, void *priv, u32 addr)
 {
+	struct sk_buff *skb;
+
 	FM_INFO("fm_callback: is called\n");
 	if (!len) {
 		FMDERR("length received is NULL\n");
 		return -EINVAL;
 	}
 
-	hs.data = kmemdup((unsigned char *)data, len, GFP_ATOMIC);
-	if (!hs.data) {
+	skb = alloc_skb(len, GFP_ATOMIC);
+	if (!skb) {
 		FMDERR("Memory not allocated\n");
 		return -ENOMEM;
 	}
-
-	hs.length = len;
+	skb_put_data(skb, data, len);
+	skb_queue_tail(&hs.rx_q, skb);
 	tasklet_schedule(&hs.rx_task);
 	return 0;
 }
