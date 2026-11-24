@@ -76,6 +76,25 @@ config RADIO_SHARK2
 	  To compile this driver as a module, choose M here: the
 	  module will be called radio-shark2.
 
+config RADIO_IRIS
+	tristate "QTI IRIS FM support"
+	depends on VIDEO_DEV
+	help
+	  Say Y here if you want to use the QTI FM chip (IRIS) of the WCNSS,
+	  that is reached over SMD.
+
+	  To compile this driver as a module, choose M here: the
+	  module will be called radio-iris.
+
+config RADIO_IRIS_TRANSPORT
+	tristate "QTI IRIS Transport"
+	depends on RADIO_IRIS && RPMSG
+	help
+	  The SMD (rpmsg APPS_FM channel) transport of the IRIS FM driver.
+
+	  To compile this driver as a module, choose M here: the
+	  module will be called radio-iris-transport.
+
 config RADIO_SI4713
 	tristate "Silicon Labs Si4713 FM Radio with RDS Transmitter support"
 
