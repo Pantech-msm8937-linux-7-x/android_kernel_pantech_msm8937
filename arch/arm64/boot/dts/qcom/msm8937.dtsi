@@ -2231,6 +2231,8 @@
 			ahb-burst-config = <0>;
 			phy-names = "usb-phy";
 			phys = <&usb_hs_phy>;
+			interconnects = <&pcnoc MAS_USB_HS1 &bimc SLV_EBI>;
+			interconnect-names = "usb-ddr";
 			status = "disabled";
 			#reset-cells = <1>;
 		};

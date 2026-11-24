@@ -12,6 +12,7 @@
 #include <linux/io.h>
 #include <linux/reset-controller.h>
 #include <linux/extcon.h>
+#include <linux/interconnect.h>
 #include <linux/of.h>
 
 #include "ci.h"
@@ -38,6 +39,8 @@ struct ci_hdrc_msm {
 	struct clk *core_clk;
 	struct clk *iface_clk;
 	struct clk *fs_clk;
+	/* the bandwidth to memory, while the controller runs */
+	struct icc_path *icc_path;
 	struct ci_hdrc_platform_data pdata;
 	struct reset_controller_dev rcdev;
 	bool secondary_phy;
@@ -86,6 +89,18 @@ static int ci_hdrc_msm_notify_event(struct ci_hdrc *ci, unsigned event)
 	case CI_HDRC_CONTROLLER_RESET_EVENT:
 		dev_dbg(dev, "CI_HDRC_CONTROLLER_RESET_EVENT received\n");
 
+		/*
+		 * Memory bandwidth while the controller runs: the NoC it reaches
+		 * memory through drops to its lowest otherwise, and transfers
+		 * slow down to a fifth. The average is what the downstream kernel
+		 * votes; the peak keeps the NoC up as the other masters did there
+		 * (adb pull: 8 MB/s without, 12 with 80 MB/s, 30 with 2 GB/s).
+		 */
+		ret = icc_set_bw(msm_ci->icc_path, kBps_to_icc(80000),
+				 kBps_to_icc(2000000));
+		if (ret)
+			dev_warn(dev, "no memory bandwidth: %d\n", ret);
+
 		hw_phymode_configure(ci);
 		if (msm_ci->secondary_phy) {
 			u32 val = readl_relaxed(msm_ci->base + HS_PHY_SEC_CTRL);
@@ -127,6 +142,7 @@ static int ci_hdrc_msm_notify_event(struct ci_hdrc *ci, unsigned event)
 		dev_dbg(dev, "CI_HDRC_CONTROLLER_STOPPED_EVENT received\n");
 		phy_power_off(ci->phy);
 		phy_exit(ci->phy);
+		icc_set_bw(msm_ci->icc_path, 0, 0);
 		break;
 	default:
 		dev_dbg(dev, "unknown ci_hdrc event\n");
@@ -207,6 +223,11 @@ static int ci_hdrc_msm_probe(struct platform_device *pdev)
 	ci->fs_clk = clk = devm_clk_get_optional(&pdev->dev, "fs");
 	if (IS_ERR(clk))
 		return PTR_ERR(clk);
+
+	ci->icc_path = devm_of_icc_get(&pdev->dev, "usb-ddr");
+	if (IS_ERR(ci->icc_path))
+		return dev_err_probe(&pdev->dev, PTR_ERR(ci->icc_path),
+				     "failed to get the interconnect path\n");
 
 	ci->base = devm_platform_ioremap_resource(pdev, 1);
 	if (IS_ERR(ci->base))
