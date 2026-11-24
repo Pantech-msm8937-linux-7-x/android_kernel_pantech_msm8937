@@ -125,6 +125,27 @@ static int q6afe_usb_hw_params(struct snd_pcm_substream *substream,
 	return 0;
 }
 
+static int q6intbtfm_hw_params(struct snd_pcm_substream *substream,
+			       struct snd_pcm_hw_params *params,
+			       struct snd_soc_dai *dai)
+{
+	struct q6afe_dai_data *dai_data = dev_get_drvdata(dai->dev);
+	struct q6afe_int_bt_fm_cfg *cfg = &dai_data->port_config[dai->id].int_bt_fm;
+
+	/* The DSP only supports 16 bit samples on the internal BT/FM ports */
+	if (params_format(params) != SNDRV_PCM_FORMAT_S16_LE) {
+		dev_err(dai->dev, "%s: invalid format %d\n",
+			__func__, params_format(params));
+		return -EINVAL;
+	}
+
+	cfg->sample_rate = params_rate(params);
+	cfg->num_channels = params_channels(params);
+	cfg->bit_width = 16;
+
+	return 0;
+}
+
 static int q6i2s_hw_params(struct snd_pcm_substream *substream,
 			   struct snd_pcm_hw_params *params,
 			   struct snd_soc_dai *dai)
@@ -434,6 +455,10 @@ static int q6afe_dai_prepare(struct snd_pcm_substream *substream,
 		q6afe_usb_port_prepare(dai_data->port[dai->id],
 				       &dai_data->port_config[dai->id].usb_audio);
 		break;
+	case INT_FM_TX:
+		q6afe_int_bt_fm_port_prepare(dai_data->port[dai->id],
+				&dai_data->port_config[dai->id].int_bt_fm);
+		break;
 	default:
 		return -EINVAL;
 	}
@@ -682,6 +707,8 @@ static const struct snd_soc_dapm_route q6afe_dapm_routes[] = {
 	{"LPI_MI2S_TX_5", NULL, "LPI TX5 MI2S Capture"},
 	{"LPI RX6 MI2S Playback", NULL, "LPI_MI2S_RX_6"},
 	{"LPI_MI2S_TX_6", NULL, "LPI TX6 MI2S Capture"},
+
+	{"INT_FM_TX", NULL, "Internal FM Capture"},
 };
 
 static int msm_dai_q6_dai_probe(struct snd_soc_dai *dai)
@@ -724,6 +751,14 @@ static const struct snd_soc_dai_ops q6afe_usb_ops = {
 	 * parameters within the AFE command, which is provided by the PCM core
 	 * during the prepare() stage.
 	 */
+};
+
+static const struct snd_soc_dai_ops q6intbtfm_ops = {
+	.probe			= msm_dai_q6_dai_probe,
+	.remove			= msm_dai_q6_dai_remove,
+	.prepare		= q6afe_dai_prepare,
+	.hw_params		= q6intbtfm_hw_params,
+	.shutdown		= q6afe_dai_shutdown,
 };
 
 static const struct snd_soc_dai_ops q6hdmi_ops = {
@@ -1057,6 +1092,7 @@ static const struct snd_soc_dapm_widget q6afe_dai_widgets[] = {
 		0, SND_SOC_NOPM, 0, 0),
 	SND_SOC_DAPM_AIF_OUT("LPI_MI2S_TX_6", NULL,
 		0, SND_SOC_NOPM, 0, 0),
+	SND_SOC_DAPM_AIF_OUT("INT_FM_TX", NULL, 0, SND_SOC_NOPM, 0, 0),
 };
 
 static const struct snd_soc_component_driver q6afe_dai_component = {
@@ -1175,6 +1211,7 @@ static int q6afe_dai_dev_probe(struct platform_device *pdev)
 	cfg.q6tdm_ops = &q6tdm_ops;
 	cfg.q6dma_ops = &q6dma_ops;
 	cfg.q6usb_ops = &q6afe_usb_ops;
+	cfg.q6intbtfm_ops = &q6intbtfm_ops;
 	dais = q6dsp_audio_ports_set_config(dev, &cfg, &num_dais);
 
 	return devm_snd_soc_register_component(dev, &q6afe_dai_component, dais, num_dais);

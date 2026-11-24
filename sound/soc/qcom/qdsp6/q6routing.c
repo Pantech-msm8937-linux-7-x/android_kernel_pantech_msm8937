@@ -134,7 +134,8 @@
 	{ mix_name, "LPI_MI2S_TX_3", "LPI_MI2S_TX_3" },		\
 	{ mix_name, "LPI_MI2S_TX_4", "LPI_MI2S_TX_4" },		\
 	{ mix_name, "LPI_MI2S_TX_5", "LPI_MI2S_TX_5" },		\
-	{ mix_name, "LPI_MI2S_TX_6", "LPI_MI2S_TX_6" }
+	{ mix_name, "LPI_MI2S_TX_6", "LPI_MI2S_TX_6" },		\
+	{ mix_name, "INT_FM_TX", "INT_FM_TX" }
 
 #define Q6ROUTING_TX_MIXERS(id)						\
 	SOC_SINGLE_EXT("PRI_MI2S_TX", PRIMARY_MI2S_TX,			\
@@ -348,6 +349,9 @@
 		id, 1, 0, msm_routing_get_audio_mixer,			\
 		msm_routing_put_audio_mixer),				\
 	SOC_SINGLE_EXT("LPI_MI2S_TX_6", LPI_MI2S_TX_6,			\
+		id, 1, 0, msm_routing_get_audio_mixer,			\
+		msm_routing_put_audio_mixer),				\
+	SOC_SINGLE_EXT("INT_FM_TX", INT_FM_TX,				\
 		id, 1, 0, msm_routing_get_audio_mixer,			\
 		msm_routing_put_audio_mixer),
 
