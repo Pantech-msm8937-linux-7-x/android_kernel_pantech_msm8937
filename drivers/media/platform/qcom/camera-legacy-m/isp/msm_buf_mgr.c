@@ -1008,8 +1008,10 @@ static int msm_isp_request_bufq(struct msm_isp_buf_mgr *buf_mgr,
 	struct msm_isp_bufq *bufq = NULL;
 	CDBG("%s: E\n", __func__);
 
-	if (!buf_request->num_buf || buf_request->num_buf > VB2_MAX_FRAME) {
-		pr_err("Invalid buffer request\n");
+	if (!buf_request->num_buf || buf_request->num_buf > MSM_CAMERA_MAX_FRAME) {
+		pr_err("Invalid buffer request: num_buf %u session %x stream %x\n",
+		       buf_request->num_buf, buf_request->session_id,
+		       buf_request->stream_id);
 		return -EINVAL;
 	}
 

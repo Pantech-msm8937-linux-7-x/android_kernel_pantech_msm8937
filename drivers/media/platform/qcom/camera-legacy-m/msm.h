@@ -142,4 +142,11 @@ long legacy_m_msm_copy_camera_private_ioctl_args(unsigned long arg,
 	struct msm_camera_private_ioctl_arg *k_ioctl,
 	void __user **tmp_compat_ioctl_ptr);
 #endif
+/*
+ * The camera userspace was written for the 64 buffers a queue of the vendor
+ * kernels had (VB2_MAX_FRAME, VIDEO_MAX_FRAME 64); the mainline default is
+ * 32, which the HAL's 64 buffer streams overflowed.
+ */
+#define MSM_CAMERA_MAX_FRAME 64
+
 #endif /*_MSM_H */
