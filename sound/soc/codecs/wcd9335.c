@@ -5583,6 +5583,32 @@ static void wcd9335_codec_init(struct snd_soc_component *component)
 	wcd9335_enable_efuse_sensing(component);
 }
 
+/*
+ * The micbias output voltages the board asks for (qcom,micbiasN-microvolt,
+ * 1 V to 2.85 V in 50 mV steps), else the 1.8 V of the reset.
+ */
+static void wcd9335_codec_set_micbias_voltages(struct snd_soc_component *comp)
+{
+	static const u16 micb_reg[] = { WCD9335_ANA_MICB1, WCD9335_ANA_MICB2,
+					WCD9335_ANA_MICB3, WCD9335_ANA_MICB4 };
+	char prop[32];
+	u32 uv;
+	int i;
+
+	for (i = 0; i < ARRAY_SIZE(micb_reg); i++) {
+		snprintf(prop, sizeof(prop), "qcom,micbias%d-microvolt", i + 1);
+		if (of_property_read_u32(comp->dev->of_node, prop, &uv))
+			continue;
+		if (uv < 1000000 || uv > 2850000) {
+			dev_err(comp->dev, "%s: %u uV out of range\n", prop, uv);
+			continue;
+		}
+		snd_soc_component_update_bits(comp, micb_reg[i],
+					      WCD9335_MICB_VOUT_MASK,
+					      (uv / 1000 - 1000) / 50);
+	}
+}
+
 static int wcd9335_codec_probe(struct snd_soc_component *component)
 {
 	struct wcd9335_codec *wcd = dev_get_drvdata(component->dev);
@@ -5601,6 +5627,8 @@ static int wcd9335_codec_probe(struct snd_soc_component *component)
 	INIT_DELAYED_WORK(&wcd->tx_hold_work, wcd9335_tx_hold_work);
 
 	wcd9335_codec_init(component);
+	/* before MBHC, which takes the headset micbias voltage from MICB2 */
+	wcd9335_codec_set_micbias_voltages(component);
 
 	for (i = 0; i < NUM_CODEC_DAIS; i++)
 		INIT_LIST_HEAD(&wcd->dai[i].slim_ch_list);
