@@ -1434,11 +1434,17 @@ int q6asm_read(struct audio_client *ac, uint32_t stream_id)
 	spin_unlock_irqrestore(&ac->lock, flags);
 	rc = apr_send_pkt(ac->adev, pkt);
 	if (rc == pkt_size)
-		rc = 0;
-	else
+		return 0;
+
+	/* not sent: the next read is to be of this buffer again */
+	spin_lock_irqsave(&ac->lock, flags);
+	port->dsp_buf = port->dsp_buf ? port->dsp_buf - 1 :
+					port->num_periods - 1;
+	spin_unlock_irqrestore(&ac->lock, flags);
+	if (rc != -EAGAIN)
 		pr_err("read op[0x%x]rc[%d]\n", pkt->hdr.opcode, rc);
 
-	return rc;
+	return rc < 0 ? rc : -EIO;
 }
 EXPORT_SYMBOL_GPL(q6asm_read);
 
