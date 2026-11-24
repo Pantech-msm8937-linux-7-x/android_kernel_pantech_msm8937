@@ -514,7 +514,7 @@ static void q6apm_lpass_dai_clocks_action(void *data)
 
 static int q6apm_lpass_dai_dev_probe(struct platform_device *pdev)
 {
-	struct q6dsp_audio_port_dai_driver_config cfg;
+	struct q6dsp_audio_port_dai_driver_config cfg = {};
 	struct q6apm_lpass_dai_data *dai_data;
 	struct snd_soc_dai_driver *dais;
 	struct device *dev = &pdev->dev;

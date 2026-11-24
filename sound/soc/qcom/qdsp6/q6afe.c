@@ -47,6 +47,7 @@
 #define AFE_PARAM_ID_PORT_SLOT_MAPPING_CONFIG	0x00010297
 #define AFE_PARAM_ID_CODEC_DMA_CONFIG	0x000102B8
 #define AFE_PARAM_ID_USB_AUDIO_CONFIG    0x000102A4
+#define AFE_PARAM_ID_INTERNAL_BT_FM_CONFIG	0x00010211
 #define AFE_CMD_REMOTE_LPASS_CORE_HW_VOTE_REQUEST	0x000100f4
 #define AFE_CMD_RSP_REMOTE_LPASS_CORE_HW_VOTE_REQUEST   0x000100f5
 #define AFE_CMD_REMOTE_LPASS_CORE_HW_DEVOTE_REQUEST	0x000100f6
@@ -76,6 +77,7 @@
 #define AFE_LINEAR_PCM_DATA				0x0
 
 #define AFE_API_MINOR_VERSION_USB_AUDIO_CONFIG 0x1
+#define AFE_API_VERSION_INTERNAL_BT_FM_CONFIG	0x1
 
 /* Port IDs */
 #define AFE_API_VERSION_HDMI_CONFIG	0x1
@@ -84,6 +86,9 @@
 
 /* USB AFE port */
 #define AFE_PORT_ID_USB_RX                       0x7000
+
+/* Internal FM (WCNSS riva) AFE port */
+#define AFE_PORT_ID_INTERNAL_FM_TX		0x3005
 
 #define AFE_API_VERSION_SLIMBUS_CONFIG 0x1
 /* Clock set API version */
@@ -620,6 +625,14 @@ struct afe_param_id_usb_audio_svc_interval {
 	u32	svc_interval;
 } __packed;
 
+/* Internal BT or FM (WCNSS riva) interface configuration */
+struct afe_param_id_internal_bt_fm_cfg {
+	u32 bt_fm_cfg_minor_version;
+	u16 num_channels;
+	u16 bit_width;
+	u32 sample_rate;
+} __packed;
+
 union afe_port_config {
 	struct afe_param_id_hdmi_multi_chan_audio_cfg hdmi_multi_ch;
 	struct afe_param_id_slimbus_cfg           slim_cfg;
@@ -627,6 +640,7 @@ union afe_port_config {
 	struct afe_param_id_tdm_cfg	tdm_cfg;
 	struct afe_param_id_cdc_dma_cfg	dma_cfg;
 	struct afe_param_id_usb_cfg usb_cfg;
+	struct afe_param_id_internal_bt_fm_cfg int_bt_fm_cfg;
 } __packed;
 
 
@@ -974,6 +988,7 @@ static struct afe_port_map port_maps[AFE_PORT_MAX] = {
 				LPI_MI2S_RX_6, 1, 1},
 	[LPI_MI2S_TX_6] = { AFE_PORT_ID_INT6_MI2S_TX,
 				LPI_MI2S_TX_6, 0, 1},
+	[INT_FM_TX] = { AFE_PORT_ID_INTERNAL_FM_TX, INT_FM_TX, 0, 1},
 };
 
 static void q6afe_port_free(struct kref *ref)
@@ -1616,6 +1631,26 @@ void q6afe_hdmi_port_prepare(struct q6afe_port *port,
 EXPORT_SYMBOL_GPL(q6afe_hdmi_port_prepare);
 
 /**
+ * q6afe_int_bt_fm_port_prepare() - Prepare internal BT/FM afe port.
+ *
+ * @port: Instance of afe port
+ * @cfg: Internal BT/FM configuration for the afe port
+ *
+ */
+void q6afe_int_bt_fm_port_prepare(struct q6afe_port *port,
+				  struct q6afe_int_bt_fm_cfg *cfg)
+{
+	union afe_port_config *pcfg = &port->port_cfg;
+
+	pcfg->int_bt_fm_cfg.bt_fm_cfg_minor_version =
+					AFE_API_VERSION_INTERNAL_BT_FM_CONFIG;
+	pcfg->int_bt_fm_cfg.num_channels = cfg->num_channels;
+	pcfg->int_bt_fm_cfg.bit_width = cfg->bit_width;
+	pcfg->int_bt_fm_cfg.sample_rate = cfg->sample_rate;
+}
+EXPORT_SYMBOL_GPL(q6afe_int_bt_fm_port_prepare);
+
+/**
  * q6afe_i2s_port_prepare() - Prepare i2s afe port.
  *
  * @port: Instance of afe port
@@ -1932,6 +1967,9 @@ struct q6afe_port *q6afe_port_get_from_id(struct device *dev, int id)
 		break;
 	case AFE_PORT_ID_USB_RX:
 		cfg_type = AFE_PARAM_ID_USB_AUDIO_CONFIG;
+		break;
+	case AFE_PORT_ID_INTERNAL_FM_TX:
+		cfg_type = AFE_PARAM_ID_INTERNAL_BT_FM_CONFIG;
 		break;
 	default:
 		dev_err(dev, "Invalid port id 0x%x\n", port_id);
