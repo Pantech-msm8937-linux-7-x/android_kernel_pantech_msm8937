@@ -6,6 +6,7 @@
 #include <dt-bindings/clock/qcom,dsi-phy-28nm.h>
 #include <dt-bindings/clock/qcom,gcc-msm8917.h>
 #include <dt-bindings/clock/qcom,rpmcc.h>
+#include <dt-bindings/interconnect/qcom,msm8937.h>
 #include <dt-bindings/interrupt-controller/arm-gic.h>
 #include <dt-bindings/power/qcom-rpmpd.h>
 #include <dt-bindings/thermal/thermal.h>
@@ -819,6 +820,12 @@
 			clock-names = "core";
 		};
 
+		bimc: interconnect@400000 {
+			compatible = "qcom,msm8937-bimc";
+			reg = <0x00400000 0x5a000>;
+			#interconnect-cells = <1>;
+		};
+
 		tsens: thermal-sensor@4a9000 {
 			compatible = "qcom,msm8937-tsens", "qcom,tsens-v1";
 			reg = <0x004a9000 0x1000>,
@@ -858,6 +865,23 @@
 		restart@4ab000 {
 			compatible = "qcom,pshold";
 			reg = <0x004ab000 0x4>;
+		};
+
+		pcnoc: interconnect@500000 {
+			compatible = "qcom,msm8937-pcnoc";
+			reg = <0x00500000 0x13080>;
+			#interconnect-cells = <1>;
+		};
+
+		snoc: interconnect@580000 {
+			compatible = "qcom,msm8937-snoc";
+			reg = <0x00580000 0x16080>;
+			#interconnect-cells = <1>;
+
+			snoc_mm: interconnect-snoc {
+				compatible = "qcom,msm8937-snoc-mm";
+				#interconnect-cells = <1>;
+			};
 		};
 
 		tlmm: pinctrl@1000000 {
@@ -1269,6 +1293,9 @@
 
 				iommus = <&apps_iommu 0x15>;
 
+				interconnects = <&snoc_mm MAS_MDP &bimc SLV_EBI>;
+				interconnect-names = "mdp0-mem";
+
 				ports {
 					#address-cells = <1>;
 					#size-cells = <0>;
@@ -1672,6 +1699,7 @@
 				      "alwayson";
 			operating-points-v2 = <&gpu_opp_table>;
 			power-domains = <&gcc OXILI_GX_GDSC>;
+			interconnects = <&bimc MAS_OXILI &bimc SLV_EBI>;
 
 			iommus = <&adreno_smmu 0>;
 
@@ -1683,36 +1711,42 @@
 				opp-19200000 {
 					opp-hz = /bits/ 64 <19200000>;
 					opp-supported-hw = <0xff>;
+					opp-peak-kBps = <0>;
 					required-opps = <&rpmpd_opp_min_svs>;
 				};
 
 				opp-216000000 {
 					opp-hz = /bits/ 64 <216000000>;
 					opp-supported-hw = <0xff>;
+					opp-peak-kBps = <2227200>;
 					required-opps = <&rpmpd_opp_svs>;
 				};
 
 				opp-300000000 {
 					opp-hz = /bits/ 64 <300000000>;
 					opp-supported-hw = <0xff>;
+					opp-peak-kBps = <4300800>;
 					required-opps = <&rpmpd_opp_svs_plus>;
 				};
 
 				opp-375000000 {
 					opp-hz = /bits/ 64 <375000000>;
 					opp-supported-hw = <0xff>;
+					opp-peak-kBps = <4454400>;
 					required-opps = <&rpmpd_opp_nom>;
 				};
 
 				opp-400000000 {
 					opp-hz = /bits/ 64 <400000000>;
 					opp-supported-hw = <0xff>;
+					opp-peak-kBps = <5299200>;
 					required-opps = <&rpmpd_opp_nom_plus>;
 				};
 
 				opp-450000000 {
 					opp-hz = /bits/ 64 <450000000>;
 					opp-supported-hw = <0xff>;
+					opp-peak-kBps = <6451200>;
 					required-opps = <&rpmpd_opp_turbo>;
 				};
 			};
