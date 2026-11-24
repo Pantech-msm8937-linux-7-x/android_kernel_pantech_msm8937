@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: GPL-2.0
 // Copyright (c) 2018, Linaro Limited
 
+#include <linux/input-event-codes.h>
 #include <linux/module.h>
 #include <linux/platform_device.h>
+#include <sound/jack.h>
 #include <sound/soc.h>
 #include <sound/soc-dapm.h>
 #include <sound/pcm.h>
@@ -18,6 +20,8 @@
 struct apq8096_snd_data {
 	/* SoundWire streams of the WSA881x amplifiers behind the codec */
 	bool stream_prepared[AFE_PORT_MAX];
+	struct snd_soc_jack jack;
+	bool jack_setup;
 };
 
 static int apq8096_be_hw_params_fixup(struct snd_soc_pcm_runtime *rtd,
@@ -121,6 +125,60 @@ static const struct snd_soc_ops apq8096_ops = {
 	.hw_free = apq8096_snd_hw_free,
 };
 
+static void apq8096_jack_free(struct snd_jack *jack)
+{
+	struct snd_soc_component *component = jack->private_data;
+
+	snd_soc_component_set_jack(component, NULL, NULL);
+}
+
+/*
+ * Headset detection is done by the codec. A codec that cannot detect the
+ * headset on this board rejects set_jack, leave the card without a jack then.
+ */
+static int apq8096_jack_init(struct snd_soc_pcm_runtime *rtd,
+			     struct snd_soc_component *component)
+{
+	struct snd_soc_card *card = rtd->card;
+	struct apq8096_snd_data *data = snd_soc_card_get_drvdata(card);
+	struct snd_jack *jack;
+	int ret;
+
+	if (data->jack_setup)
+		return 0;
+
+	if (snd_soc_component_set_jack(component, NULL, NULL) == -ENOTSUPP)
+		return 0;
+
+	ret = snd_soc_card_jack_new(card, "Headset Jack",
+				    SND_JACK_HEADSET | SND_JACK_LINEOUT |
+				    SND_JACK_MECHANICAL |
+				    SND_JACK_BTN_0 | SND_JACK_BTN_1 |
+				    SND_JACK_BTN_2 | SND_JACK_BTN_3,
+				    &data->jack);
+	if (ret) {
+		dev_err(card->dev, "Unable to add Headset Jack: %d\n", ret);
+		return ret;
+	}
+
+	jack = data->jack.jack;
+	snd_jack_set_key(jack, SND_JACK_BTN_0, KEY_PLAYPAUSE);
+	snd_jack_set_key(jack, SND_JACK_BTN_1, KEY_VOICECOMMAND);
+	snd_jack_set_key(jack, SND_JACK_BTN_2, KEY_VOLUMEUP);
+	snd_jack_set_key(jack, SND_JACK_BTN_3, KEY_VOLUMEDOWN);
+
+	jack->private_data = component;
+	jack->private_free = apq8096_jack_free;
+	data->jack_setup = true;
+
+	/* Audio keeps working without headset detection */
+	ret = snd_soc_component_set_jack(component, &data->jack, NULL);
+	if (ret)
+		dev_warn(card->dev, "Failed to set jack: %d\n", ret);
+
+	return 0;
+}
+
 static int apq8096_init(struct snd_soc_pcm_runtime *rtd)
 {
 	struct snd_soc_dai *codec_dai = apq8096_slim_codec_dai(rtd);
@@ -143,7 +201,7 @@ static int apq8096_init(struct snd_soc_pcm_runtime *rtd)
 	snd_soc_dai_set_sysclk(codec_dai, 0, WCD9335_DEFAULT_MCLK_RATE,
 				SNDRV_PCM_STREAM_PLAYBACK);
 
-	return 0;
+	return apq8096_jack_init(rtd, codec_dai->component);
 }
 
 static void apq8096_add_be_ops(struct snd_soc_card *card)
