@@ -1932,13 +1932,46 @@
 			pinctrl-1 = <&sdc1_sleep>;
 			pinctrl-names = "default",
 					"sleep";
+			interconnects = <&pcnoc MAS_SDCC_1 &bimc SLV_EBI>,
+					<&bimc MAS_APPS_PROC &pcnoc SLV_SDCC_1>;
+			interconnect-names = "sdhc-ddr", "cpu-sdhc";
+			operating-points-v2 = <&sdhc1_opp_table>;
 			power-domains = <&rpmpd RPMPD_VDDCX>;
 			mmc-hs200-1_8v;
 			mmc-hs400-1_8v;
 			mmc-ddr-1_8v;
 			bus-width = <8>;
 			non-removable;
+
 			status = "disabled";
+
+			/*
+			 * The bandwidths of the stock bus table, by the clock: the
+			 * NoCs drop to their lowest without them, and the eMMC reads
+			 * at less than half the speed.
+			 */
+			sdhc1_opp_table: opp-table {
+				compatible = "operating-points-v2";
+
+				opp-50000000 {
+					opp-hz = /bits/ 64 <50000000>;
+					opp-peak-kBps = <200000 140000>;
+					opp-avg-kBps = <65360 133320>;
+				};
+
+				opp-100000000 {
+					opp-hz = /bits/ 64 <100000000>;
+					opp-peak-kBps = <400000 160000>;
+					opp-avg-kBps = <130718 150000>;
+				};
+
+				/* above every rate of the controller */
+				opp-400000000 {
+					opp-hz = /bits/ 64 <400000000>;
+					opp-peak-kBps = <4096000 4096000>;
+					opp-avg-kBps = <1338562 1338562>;
+				};
+			};
 		};
 
 		sdhc_2: mmc@7864900 {
@@ -1962,9 +1995,42 @@
 			pinctrl-1 = <&sdc2_sleep>;
 			pinctrl-names = "default",
 					"sleep";
+			interconnects = <&pcnoc MAS_SDCC_2 &bimc SLV_EBI>,
+					<&bimc MAS_APPS_PROC &pcnoc SLV_SDCC_2>;
+			interconnect-names = "sdhc-ddr", "cpu-sdhc";
+			operating-points-v2 = <&sdhc2_opp_table>;
 			power-domains = <&rpmpd RPMPD_VDDCX>;
 			bus-width = <4>;
+
 			status = "disabled";
+
+			/*
+			 * The bandwidths of the stock bus table, by the clock: the
+			 * NoCs drop to their lowest without them, and the eMMC reads
+			 * at less than half the speed.
+			 */
+			sdhc2_opp_table: opp-table {
+				compatible = "operating-points-v2";
+
+				opp-50000000 {
+					opp-hz = /bits/ 64 <50000000>;
+					opp-peak-kBps = <200000 140000>;
+					opp-avg-kBps = <65360 133320>;
+				};
+
+				opp-100000000 {
+					opp-hz = /bits/ 64 <100000000>;
+					opp-peak-kBps = <400000 160000>;
+					opp-avg-kBps = <130718 150000>;
+				};
+
+				/* above every rate of the controller */
+				opp-400000000 {
+					opp-hz = /bits/ 64 <400000000>;
+					opp-peak-kBps = <4096000 4096000>;
+					opp-avg-kBps = <1338562 1338562>;
+				};
+			};
 		};
 
 		blsp1_dma: dma-controller@7884000 {
