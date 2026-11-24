@@ -735,6 +735,10 @@ static int mdp5_init(struct platform_device *pdev, struct drm_device *dev)
 	config = mdp5_cfg_get_config(mdp5_kms->cfg);
 	mdp5_kms->caps = config->hw->mdp.caps;
 
+	mdp5_kms->ubwc = qcom_ubwc_config_get_data();
+	if (IS_ERR(mdp5_kms->ubwc) || !mdp5_kms->ubwc->ubwc_enc_version)
+		mdp5_kms->ubwc = NULL;
+
 	/* TODO: compute core clock rate at runtime */
 	clk_set_rate(mdp5_kms->core_clk, config->hw->max_clk);
 

@@ -7,6 +7,7 @@
 #ifndef __MDP5_KMS_H__
 #define __MDP5_KMS_H__
 
+#include <linux/soc/qcom/ubwc.h>
 #include "msm_drv.h"
 #include "msm_kms.h"
 #include "disp/mdp_kms.h"
@@ -35,6 +36,9 @@ struct mdp5_kms {
 
 	struct mdp5_cfg_handler *cfg;
 	uint32_t caps;	/* MDP capabilities (MDP_CAP_XXX bits) */
+
+	/* UBWC of the SoC, if it has (see mdp5_plane_format_mod_supported()) */
+	const struct qcom_ubwc_cfg_data *ubwc;
 
 	/*
 	 * Global private object state, Do not access directly, use
