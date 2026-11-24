@@ -74,7 +74,43 @@ struct q6asm_dai_rtd {
 	uint32_t initial_samples_drop;
 	uint32_t trailing_samples_drop;
 	bool notify_on_drain;
+	/* capture: buffers to queue to the DSP that the APR FIFO took not yet */
+	unsigned int reads_owed;
+	struct delayed_work read_retry;
 };
+
+/*
+ * Queue the capture buffers owed to the DSP. The APR packets go out with
+ * rpmsg_trysend(), which fails with -EAGAIN while the SMD FIFO is full: keep
+ * the reads owed then and try again shortly, rather than leave the DSP with
+ * no buffer to fill, which stopped the capture for good.
+ */
+static void q6asm_dai_queue_reads(struct q6asm_dai_rtd *prtd)
+{
+	unsigned long flags;
+	int ret;
+
+	spin_lock_irqsave(&prtd->lock, flags);
+	while (prtd->reads_owed && prtd->state == Q6ASM_STREAM_RUNNING) {
+		ret = q6asm_read(prtd->audio_client, prtd->stream_id);
+		if (ret == -EAGAIN) {
+			schedule_delayed_work(&prtd->read_retry,
+					      msecs_to_jiffies(2));
+			break;
+		}
+		prtd->reads_owed--;
+	}
+	spin_unlock_irqrestore(&prtd->lock, flags);
+}
+
+static void q6asm_dai_read_retry(struct work_struct *work)
+{
+	struct q6asm_dai_rtd *prtd = container_of(to_delayed_work(work),
+						  struct q6asm_dai_rtd,
+						  read_retry);
+
+	q6asm_dai_queue_reads(prtd);
+}
 
 struct q6asm_dai_data {
 	struct snd_soc_dai_driver *dais;
@@ -202,12 +238,16 @@ static void event_handler(uint32_t opcode, uint32_t token,
 		snd_pcm_stream_unlock_irqrestore(substream, flags);
 		break;
 	}
-	case ASM_CLIENT_EVENT_DATA_READ_DONE:
-		snd_pcm_period_elapsed(substream);
-		if (prtd->state == Q6ASM_STREAM_RUNNING)
-			q6asm_read(prtd->audio_client, prtd->stream_id);
+	case ASM_CLIENT_EVENT_DATA_READ_DONE: {
+		unsigned long flags;
 
+		snd_pcm_period_elapsed(substream);
+		spin_lock_irqsave(&prtd->lock, flags);
+		prtd->reads_owed++;
+		spin_unlock_irqrestore(&prtd->lock, flags);
+		q6asm_dai_queue_reads(prtd);
 		break;
+	}
 	default:
 		break;
 	}
@@ -301,15 +341,17 @@ static int q6asm_dai_prepare(struct snd_soc_component *component,
 							   runtime->channels,
 							   prtd->bits_per_sample);
 
-		/* Queue the buffers */
-		for (i = 0; i < runtime->periods; i++)
-			q6asm_read(prtd->audio_client, prtd->stream_id);
-
 	}
 	if (ret < 0)
 		dev_info(dev, "%s: CMD Format block failed\n", __func__);
 	else
 		prtd->state = Q6ASM_STREAM_RUNNING;
+
+	if (!ret && substream->stream == SNDRV_PCM_STREAM_CAPTURE) {
+		/* Queue the buffers */
+		prtd->reads_owed = runtime->periods;
+		q6asm_dai_queue_reads(prtd);
+	}
 
 	return ret;
 
@@ -417,6 +459,8 @@ static int q6asm_dai_open(struct snd_soc_component *component,
 		return -ENOMEM;
 
 	prtd->substream = substream;
+	spin_lock_init(&prtd->lock);
+	INIT_DELAYED_WORK(&prtd->read_retry, q6asm_dai_read_retry);
 	prtd->audio_client = q6asm_audio_client_alloc(dev,
 				(q6asm_cb)event_handler, prtd, stream_id,
 				LEGACY_PCM_MODE);
@@ -490,8 +534,13 @@ static int q6asm_dai_close(struct snd_soc_component *component,
 	struct snd_soc_pcm_runtime *soc_prtd = snd_soc_substream_to_rtd(substream);
 	struct q6asm_dai_rtd *prtd = runtime->private_data;
 
+	bool running = prtd->state == Q6ASM_STREAM_RUNNING;
+
+	/* no read retry is to run on the stream being closed */
+	prtd->state = Q6ASM_STREAM_STOPPED;
+	cancel_delayed_work_sync(&prtd->read_retry);
 	if (prtd->audio_client) {
-		if (prtd->state == Q6ASM_STREAM_RUNNING) {
+		if (running) {
 			q6asm_cmd(prtd->audio_client, prtd->stream_id,
 				  CMD_CLOSE);
 			q6asm_unmap_memory_regions(substream->stream,
