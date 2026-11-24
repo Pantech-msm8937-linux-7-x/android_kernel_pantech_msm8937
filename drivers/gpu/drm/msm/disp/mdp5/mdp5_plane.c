@@ -123,7 +123,44 @@ static void mdp5_plane_destroy_state(struct drm_plane *plane,
 	kfree(pstate);
 }
 
+/*
+ * UBWC (DRM_FORMAT_MOD_QCOM_COMPRESSED) of the RGB formats of 32 bits, as
+ * the downstream kernel scans them out on MSM8937: the flags, a byte for
+ * each tile of 16x4 pixels, then the pixels, on the next page, all in the
+ * one plane, as DPU and minigbm have it.
+ */
+static bool mdp5_plane_format_mod_supported(struct drm_plane *plane,
+					    uint32_t format, uint64_t modifier)
+{
+	struct mdp5_kms *mdp5_kms = get_kms(plane);
+
+	if (modifier == DRM_FORMAT_MOD_LINEAR)
+		return true;
+
+	if (modifier != DRM_FORMAT_MOD_QCOM_COMPRESSED || !mdp5_kms->ubwc)
+		return false;
+
+	switch (format) {
+	case DRM_FORMAT_ABGR8888:
+	case DRM_FORMAT_ARGB8888:
+	case DRM_FORMAT_XBGR8888:
+	case DRM_FORMAT_XRGB8888:
+		return true;
+	default:
+		return false;
+	}
+}
+
+static uint32_t mdp5_ubwc_meta_size(const struct drm_framebuffer *fb,
+				    uint32_t *pitch)
+{
+	*pitch = round_up(DIV_ROUND_UP(fb->width, 16), 64);
+	return round_up(*pitch * round_up(DIV_ROUND_UP(fb->height, 4), 16),
+			4096);
+}
+
 static const struct drm_plane_funcs mdp5_plane_funcs = {
+		.format_mod_supported = mdp5_plane_format_mod_supported,
 		.update_plane = drm_atomic_helper_update_plane,
 		.disable_plane = drm_atomic_helper_disable_plane,
 		.reset = mdp5_plane_reset,
@@ -471,6 +508,22 @@ static void set_scanout_locked(struct mdp5_kms *mdp5_kms,
 			       enum mdp5_pipe pipe,
 			       struct drm_framebuffer *fb)
 {
+	if (fb->modifier == DRM_FORMAT_MOD_QCOM_COMPRESSED) {
+		uint32_t meta_pitch, meta_size = mdp5_ubwc_meta_size(fb, &meta_pitch);
+		uint32_t iova = msm_framebuffer_iova(fb, 0);
+
+		/* the pixels to plane 0, the flags to plane 2, as DPU */
+		mdp5_write(mdp5_kms, REG_MDP5_PIPE_SRC_STRIDE_A(pipe),
+				MDP5_PIPE_SRC_STRIDE_A_P0(fb->pitches[0]));
+		mdp5_write(mdp5_kms, REG_MDP5_PIPE_SRC_STRIDE_B(pipe),
+				MDP5_PIPE_SRC_STRIDE_B_P2(meta_pitch));
+		mdp5_write(mdp5_kms, REG_MDP5_PIPE_SRC0_ADDR(pipe), iova + meta_size);
+		mdp5_write(mdp5_kms, REG_MDP5_PIPE_SRC1_ADDR(pipe), 0);
+		mdp5_write(mdp5_kms, REG_MDP5_PIPE_SRC2_ADDR(pipe), iova);
+		mdp5_write(mdp5_kms, REG_MDP5_PIPE_SRC3_ADDR(pipe), 0);
+		return;
+	}
+
 	mdp5_write(mdp5_kms, REG_MDP5_PIPE_SRC_STRIDE_A(pipe),
 			MDP5_PIPE_SRC_STRIDE_A_P0(fb->pitches[0]) |
 			MDP5_PIPE_SRC_STRIDE_A_P1(fb->pitches[1]));
@@ -764,6 +817,7 @@ static void mdp5_hwpipe_mode_set(struct mdp5_kms *mdp5_kms,
 	bool has_pe = hwpipe->caps & MDP_PIPE_CAP_SW_PIX_EXT;
 	const struct msm_format *format =
 			msm_framebuffer_format(fb);
+	const bool ubwc = fb->modifier == DRM_FORMAT_MOD_QCOM_COMPRESSED;
 
 	mdp5_write(mdp5_kms, REG_MDP5_PIPE_SRC_IMG_SIZE(pipe),
 			MDP5_PIPE_SRC_IMG_SIZE_WIDTH(src_img_w) |
@@ -796,7 +850,9 @@ static void mdp5_hwpipe_mode_set(struct mdp5_kms *mdp5_kms,
 			COND(format->flags & MSM_FORMAT_FLAG_UNPACK_TIGHT,
 			     MDP5_PIPE_SRC_FORMAT_UNPACK_TIGHT) |
 			MDP5_PIPE_SRC_FORMAT_FETCH_TYPE(format->fetch_type) |
-			MDP5_PIPE_SRC_FORMAT_CHROMA_SAMP(format->chroma_sample));
+			MDP5_PIPE_SRC_FORMAT_CHROMA_SAMP(format->chroma_sample) |
+			/* FRAME_FORMAT, as DPU has it: UBWC */
+			COND(ubwc, (format->fetch_mode & 3) << 30));
 
 	mdp5_write(mdp5_kms, REG_MDP5_PIPE_SRC_UNPACK(pipe),
 			MDP5_PIPE_SRC_UNPACK_ELEM0(format->element[0]) |
@@ -808,7 +864,24 @@ static void mdp5_hwpipe_mode_set(struct mdp5_kms *mdp5_kms,
 			(hflip ? MDP5_PIPE_SRC_OP_MODE_FLIP_LR : 0) |
 			(vflip ? MDP5_PIPE_SRC_OP_MODE_FLIP_UD : 0) |
 			COND(has_pe, MDP5_PIPE_SRC_OP_MODE_SW_PIX_EXT_OVERRIDE) |
+			COND(ubwc, MDP5_PIPE_SRC_OP_MODE_BWC_EN) |
 			MDP5_PIPE_SRC_OP_MODE_BWC(BWC_LOSSLESS));
+
+	/*
+	 * UBWC 1.0, as DPU programs it: the fetch of the flags, fast clear of
+	 * formats with alpha, level 1 bank swizzling and the highest bank bit
+	 */
+	if (ubwc) {
+		const struct qcom_ubwc_cfg_data *cfg = mdp5_kms->ubwc;
+		u32 hbb = cfg->highest_bank_bit - 13;
+
+		mdp5_write(mdp5_kms, REG_MDP5_PIPE_FETCH_CONFIG(pipe),
+				0x00000087 | hbb << 18);
+		mdp5_write(mdp5_kms, REG_MDP5_PIPE_FETCH_CONFIG(pipe) - 0x4,
+				COND(format->alpha_enable, BIT(31)) |
+				(qcom_ubwc_swizzle(cfg) & UBWC_SWIZZLE_ENABLE_LVL1) |
+				BIT(8) | hbb << 4);
+	}
 
 	/* not using secure mode: */
 	mdp5_write(mdp5_kms, REG_MDP5_PIPE_SRC_ADDR_SW_STATUS(pipe), 0);
@@ -1030,10 +1103,16 @@ struct drm_plane *mdp5_plane_init(struct drm_device *dev,
 	struct drm_plane *plane = NULL;
 	struct mdp5_plane *mdp5_plane;
 
+	static const uint64_t modifiers[] = {
+		DRM_FORMAT_MOD_LINEAR,
+		DRM_FORMAT_MOD_QCOM_COMPRESSED,
+		DRM_FORMAT_MOD_INVALID,
+	};
+
 	mdp5_plane = drmm_universal_plane_alloc(dev, struct mdp5_plane, base,
 						0xff, &mdp5_plane_funcs,
 						mdp5_plane_formats, ARRAY_SIZE(mdp5_plane_formats),
-						NULL, type, NULL);
+						modifiers, type, NULL);
 	if (IS_ERR(mdp5_plane))
 		return ERR_CAST(mdp5_plane);
 
