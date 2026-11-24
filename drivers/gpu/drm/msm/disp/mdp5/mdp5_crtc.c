@@ -1309,10 +1309,24 @@ void mdp5_crtc_wait_for_commit_done(struct drm_crtc *crtc)
 {
 	struct mdp5_crtc_state *mdp5_cstate = to_mdp5_crtc_state(crtc->state);
 
-	if (mdp5_cstate->cmd_mode)
-		mdp5_crtc_wait_for_pp_done(crtc);
-	else
+	struct mdp5_crtc *mdp5_crtc = to_mdp5_crtc(crtc);
+
+	/*
+	 * Command mode: right after a flush, wait only for the hardware to
+	 * take it (the transfer of the frame starting at the TE), as in video
+	 * mode, the buffers of the previous frame being done with then; the
+	 * end of the transfer (PP_DONE) is waited for before the next flush.
+	 * Waiting for PP_DONE after the flush held each commit for a whole
+	 * TE period, and the next one, whatever late, for one more.
+	 */
+	if (mdp5_cstate->cmd_mode) {
+		if (mdp5_crtc->flushed_mask)
+			mdp5_crtc_wait_for_flush_done(crtc);
+		else
+			mdp5_crtc_wait_for_pp_done(crtc);
+	} else {
 		mdp5_crtc_wait_for_flush_done(crtc);
+	}
 }
 
 /* initialize crtc */
