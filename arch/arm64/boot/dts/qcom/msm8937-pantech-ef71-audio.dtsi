@@ -121,6 +121,23 @@
 				sound-dai = <&wcd9335 AIF1_CAP>;
 			};
 		};
+
+		/*
+		 * FM receiver audio from the WCNSS FM core, which the ADSP
+		 * gets on the internal FM port. There is no codec on this
+		 * path, the link gets the dummy codec.
+		 */
+		int-fm-cap-dai-link {
+			link-name = "INT_FM Capture";
+
+			cpu {
+				sound-dai = <&q6afedai INT_FM_TX>;
+			};
+
+			platform {
+				sound-dai = <&q6routing>;
+			};
+		};
 	};
 };
 
@@ -239,6 +256,10 @@
 
 	dai@3 {
 		reg = <SLIMBUS_0_TX>;
+	};
+
+	dai@99 {
+		reg = <INT_FM_TX>;
 	};
 };
 

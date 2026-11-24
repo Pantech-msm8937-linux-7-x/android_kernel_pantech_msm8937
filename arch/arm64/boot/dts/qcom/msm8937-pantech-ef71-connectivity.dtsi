@@ -11,6 +11,13 @@
 #include <dt-bindings/interrupt-controller/irq.h>
 #include <dt-bindings/pinctrl/qcom,pmic-gpio.h>
 
+/ {
+	/* the FM radio of the WCNSS, reached over its APPS_FM SMD channel */
+	iris-fm {
+		compatible = "qcom,iris_fm";
+	};
+};
+
 &bam_dmux {
 	status = "okay";
 };
