@@ -301,6 +301,15 @@ int qcom_snd_parse_of(struct snd_soc_card *card)
 				link->no_pcm = 1;
 				link->ignore_pmdown_time = 1;
 			}
+		} else if (platform) {
+			/*
+			 * DPCM backend of a DSP port without an external codec,
+			 * e.g. the internal FM port fed by the WCNSS FM core.
+			 */
+			link->codecs	 = &snd_soc_dummy_dlc;
+			link->num_codecs = 1;
+			link->no_pcm = 1;
+			link->ignore_pmdown_time = 1;
 		} else {
 			/* DPCM frontend */
 			link->codecs	 = &snd_soc_dummy_dlc;
