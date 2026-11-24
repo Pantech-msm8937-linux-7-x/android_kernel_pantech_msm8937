@@ -139,13 +139,22 @@ static struct clk_alpha_pll gpll3_early = {
 static struct clk_alpha_pll_postdiv gpll3 = {
 	.offset = 0x22000,
 	.regs = clk_alpha_pll_regs[CLK_ALPHA_PLL_TYPE_DEFAULT],
+	/*
+	 * The post divider of the configuration (GENMASK(11, 8), set to 2),
+	 * kept: the GPU rates of GPLL3 come from its VCO at twice them. With
+	 * no width the divider was taken as 1 and the rates asked of the VCO
+	 * itself, which rounded them up to its lowest (525 MHz on MSM8937 for
+	 * all of 300, 375 and 450 MHz); and changing the divider while the GPU
+	 * runs from it hangs the GPU.
+	 */
+	.width = 4,
 	.clkr.hw.init = &(struct clk_init_data){
 		.name = "gpll3",
 		.parent_hws = (const struct clk_hw*[]){
 			&gpll3_early.clkr.hw,
 		},
 		.num_parents = 1,
-		.ops = &clk_alpha_pll_postdiv_ops,
+		.ops = &clk_alpha_pll_postdiv_ro_ops,
 		.flags = CLK_SET_RATE_PARENT,
 	},
 };
