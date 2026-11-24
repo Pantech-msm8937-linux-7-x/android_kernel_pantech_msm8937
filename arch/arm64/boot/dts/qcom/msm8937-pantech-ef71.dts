@@ -36,6 +36,11 @@
 			<241 0>, <242 0>, <243 0>, <244 0>, <245 0>, <246 0>;
 	qcom,pmic-id = <0x10019 0x010011 0x0 0x0>;
 
+	/* the FM radio of the WCNSS, reached over its APPS_FM SMD channel */
+	iris-fm {
+		compatible = "qcom,iris_fm";
+	};
+
 	aliases {
 		mmc0 = &sdhc_1;
 		mmc1 = &sdhc_2;
@@ -998,6 +1003,23 @@
 				sound-dai = <&wcd9335 AIF1_CAP>;
 			};
 		};
+
+		/*
+		 * FM receiver audio from the WCNSS FM core, which the ADSP
+		 * gets on the internal FM port. There is no codec on this
+		 * path, the link gets the dummy codec.
+		 */
+		int-fm-cap-dai-link {
+			link-name = "INT_FM Capture";
+
+			cpu {
+				sound-dai = <&q6afedai INT_FM_TX>;
+			};
+
+			platform {
+				sound-dai = <&q6routing>;
+			};
+		};
 	};
 };
 
@@ -1116,6 +1138,10 @@
 
 	dai@3 {
 		reg = <SLIMBUS_0_TX>;
+	};
+
+	dai@99 {
+		reg = <INT_FM_TX>;
 	};
 };
 
