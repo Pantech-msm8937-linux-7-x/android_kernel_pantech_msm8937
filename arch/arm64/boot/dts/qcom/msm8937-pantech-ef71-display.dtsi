@@ -1,0 +1,81 @@
+// SPDX-License-Identifier: GPL-2.0-only
+/*
+ * EF71 GPU and display: Adreno 505, MDSS and the NT35695 command mode
+ * panel on DSI0.
+ */
+
+#include <dt-bindings/gpio/gpio.h>
+
+&gpu {
+	status = "okay";
+};
+
+/*
+ * No 19.2 MHz level, as on the stock kernel (216 MHz the lowest): from
+ * there simple_ondemand takes frames of polling to bring the GPU up.
+ */
+&gpu_opp_table {
+	/delete-node/ opp-19200000;
+};
+
+&mdss {
+	status = "okay";
+};
+
+&mdss_dsi0 {
+	vdda-supply = <&pm8937_l2>;
+	vddio-supply = <&pm8937_l6>;
+
+	/*
+	 * The vendor T_CLK_POST: at the computed minimum the NT35695 drops
+	 * the last lines of every frame and shows noise along the bottom.
+	 */
+	qcom,dsi-min-t-clk-post = <0x21>;
+
+	status = "okay";
+
+	/* EF71S; the EF71AS carries an FT8716 video mode panel instead */
+	panel@0 {
+		compatible = "pantech,ef71-nt35695";
+		reg = <0>;
+
+		reset-gpios = <&tlmm 60 GPIO_ACTIVE_LOW>;
+
+		pinctrl-0 = <&panel_default &mdp_te_default>;
+		pinctrl-names = "default";
+
+		port {
+			panel_in: endpoint {
+				remote-endpoint = <&mdss_dsi0_out>;
+			};
+		};
+	};
+};
+
+&mdss_dsi0_out {
+	data-lanes = <0 1 2 3>;
+	remote-endpoint = <&panel_in>;
+};
+
+&mdss_dsi0_phy {
+	vddio-supply = <&pm8937_l6>;
+	qcom,dsi-phy-regulator-ldo-mode;
+
+	status = "okay";
+};
+
+&tlmm {
+	mdp_te_default: mdp-te-default-state {
+		pins = "gpio24";
+		function = "mdp_vsync";
+		drive-strength = <2>;
+		bias-pull-down;
+	};
+
+	panel_default: panel-default-state {
+		pins = "gpio60";
+		function = "gpio";
+		drive-strength = <8>;
+		bias-disable;
+	};
+};

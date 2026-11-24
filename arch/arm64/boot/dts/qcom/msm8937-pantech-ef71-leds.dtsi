@@ -1,0 +1,94 @@
+// SPDX-License-Identifier: GPL-2.0-only
+/*
+ * EF71 LEDs: the PMI8950 camera flash and the LP5523 behind the front
+ * indicator and key backlights.
+ */
+
+#include <dt-bindings/clock/qcom,gcc-msm8917.h>
+#include <dt-bindings/gpio/gpio.h>
+#include <dt-bindings/interrupt-controller/arm-gic.h>
+#include <dt-bindings/leds/common.h>
+
+&pmi8950_flash {
+	#address-cells = <1>;
+	#size-cells = <0>;
+
+	status = "okay";
+
+	pmi8950_flash_led: led@0 {
+		reg = <0>;
+		function = LED_FUNCTION_FLASH;
+		color = <LED_COLOR_ID_WHITE>;
+		led-max-microamp = <200000>;
+		flash-max-microamp = <1000000>;
+		flash-max-timeout-us = <1280000>;
+	};
+};
+
+/*
+ * BLSP2 QUP4, absent from msm8937.dtsi, carries the LP5523 that drives the
+ * front indicator, a left and a right RGB LED, and the menu and back key
+ * backlights. Channel 8 only took the commands of the Pantech driver.
+ */
+&soc {
+	blsp2_i2c4: i2c@7af8000 {
+		compatible = "qcom,i2c-qup-v2.2.1";
+		clock-frequency = <400000>;
+		reg = <0x07af8000 0x600>;
+		interrupts = <GIC_SPI 302 IRQ_TYPE_LEVEL_HIGH>;
+		clocks = <&gcc MSM8937_GCC_BLSP2_QUP4_I2C_APPS_CLK>,
+			 <&gcc GCC_BLSP2_AHB_CLK>;
+		clock-names = "core",
+			      "iface";
+		dmas = <&blsp2_dma 10>,
+		       <&blsp2_dma 11>;
+		dma-names = "tx",
+			    "rx";
+		pinctrl-0 = <&blsp2_i2c4_default>;
+		pinctrl-1 = <&blsp2_i2c4_sleep>;
+		pinctrl-names = "default",
+				"sleep";
+		#address-cells = <1>;
+		#size-cells = <0>;
+
+		/*
+		 * The front indicator (a left and a right RGB LED) and the menu
+		 * and back key backlights, on Pantech's driver as on the stock
+		 * kernel: channel 8 takes the commands.
+		 */
+		led-controller@32 {
+			compatible = "ti,lp5523_led_driver";
+			reg = <0x32>;
+			enable-gpios = <&tlmm 129 GPIO_ACTIVE_HIGH>;
+			pinctrl-0 = <&lp5523_en_default>;
+			pinctrl-names = "default";
+			lp5523,clock_mode = <1>;
+			lp5523,max_chan = <9>;
+			lp5523,led_current = <40>;
+			lp5523,max_current = <250>;
+		};
+	};
+};
+
+&tlmm {
+	blsp2_i2c4_default: blsp2-i2c4-default-state {
+		pins = "gpio98", "gpio99";
+		function = "blsp_i2c8";
+		drive-strength = <2>;
+		bias-disable;
+	};
+
+	blsp2_i2c4_sleep: blsp2-i2c4-sleep-state {
+		pins = "gpio98", "gpio99";
+		function = "gpio";
+		drive-strength = <2>;
+		bias-disable;
+	};
+
+	lp5523_en_default: lp5523-en-default-state {
+		pins = "gpio129";
+		function = "gpio";
+		drive-strength = <2>;
+		bias-disable;
+	};
+};

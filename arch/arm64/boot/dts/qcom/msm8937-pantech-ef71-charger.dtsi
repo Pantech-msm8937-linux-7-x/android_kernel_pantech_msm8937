@@ -1,0 +1,67 @@
+// SPDX-License-Identifier: GPL-2.0-only
+/*
+ * EF71 charging: the battery, the PMI8950 fuel gauge and charger, and
+ * the wireless receiver and MAX14731 lines.
+ */
+
+#include <dt-bindings/gpio/gpio.h>
+
+/ {
+	/* 2950 mAh 4.4 V cell; msm-3.18 floats it at 4.42 V */
+	battery: battery {
+		compatible = "simple-battery";
+
+		charge-full-design-microamp-hours = <2950000>;
+		charge-term-current-microamp = <200000>;
+		constant-charge-current-max-microamp = <2200000>;
+		voltage-min-design-microvolt = <3400000>;
+		voltage-max-design-microvolt = <4400000>;
+	};
+};
+
+&pmi8950_fg {
+	monitored-battery = <&battery>;
+	power-supplies = <&pmi8950_smbcharger>;
+
+	status = "okay";
+};
+
+&pmi8950_smbcharger {
+	monitored-battery = <&battery>;
+	/* A cable takes over from the wireless pad, as on the vendor software */
+	qcom,dc-yields-to-usb;
+	/* The 5 W of the BQ51221 wireless receiver (vendor software: 700 mA) */
+	qcom,dc-current-limit-microamp = <1000000>;
+
+	status = "okay";
+};
+
+&tlmm {
+	pinctrl-0 = <&wlc_det_default>;
+	pinctrl-names = "default";
+
+	/*
+	 * Detect lines of the BQ51221 wireless receiver and the MAX14731
+	 * (WL_PG, WLC_DET_N, WL_PAD_DET, USB_VBUS_DET_N), set up as the
+	 * vendor software does.
+	 */
+	wlc_det_default: wlc-det-default-state {
+		pins = "gpio12", "gpio61", "gpio62", "gpio63";
+		function = "gpio";
+		drive-strength = <6>;
+		bias-pull-up;
+	};
+
+	/*
+	 * The MAX14731 in front of USBIN and the DCIN of the BQ51221 wireless
+	 * receiver: the vendor driver holds OVP_EN_N and P-CONNECT low as
+	 * outputs, without which the wireless input stays cut off. OTG_EN goes
+	 * with the OTG VBUS regulator.
+	 */
+	max14731-ctrl-hog {
+		gpio-hog;
+		gpios = <59 GPIO_ACTIVE_HIGH>, <125 GPIO_ACTIVE_HIGH>;
+		output-low;
+		line-name = "max14731-ctrl";
+	};
+};

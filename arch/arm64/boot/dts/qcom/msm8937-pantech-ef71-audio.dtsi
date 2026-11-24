@@ -1,0 +1,303 @@
+// SPDX-License-Identifier: GPL-2.0-only
+/*
+ * EF71 audio: the WCD9335 codec on SLIMbus, the WSA8810 loudspeaker
+ * amplifier on its SoundWire master, the Q6 DSP back ends and the
+ * sound card.
+ */
+
+#include <dt-bindings/clock/qcom,rpmcc.h>
+#include <dt-bindings/gpio/gpio.h>
+#include <dt-bindings/interrupt-controller/arm-gic.h>
+#include <dt-bindings/interrupt-controller/irq.h>
+#include <dt-bindings/pinctrl/qcom,pmic-gpio.h>
+#include <dt-bindings/sound/qcom,q6afe.h>
+#include <dt-bindings/sound/qcom,q6asm.h>
+#include <dt-bindings/sound/qcom,wcd9335.h>
+
+/*
+ * Audio: WCD9335 (Tasha) on the SLIMbus of the ADSP, as on the OnePlus 3
+ * (MSM8996). Wiring from the msm-4.19 EF71 tree: reset on GPIO 68,
+ * interrupt on GPIO 73, MCLK as the 9.6 MHz RPM DIV_CLK2 out of PM8937
+ * GPIO 1, 1.8 V buck supply switched by PM8937 GPIO 7.
+ */
+/ {
+	wcd_mclk: wcd-mclk {
+		compatible = "fixed-factor-clock";
+		clocks = <&rpmcc RPM_SMD_DIV_CLK2>;
+		clock-div = <2>;
+		clock-mult = <1>;
+		#clock-cells = <0>;
+		clock-output-names = "wcd_mclk";
+	};
+
+	wcd_eldo2: regulator-wcd-eldo2 {
+		compatible = "regulator-fixed";
+		regulator-name = "wcd_eldo2";
+		regulator-min-microvolt = <1800000>;
+		regulator-max-microvolt = <1800000>;
+		gpio = <&pm8937_gpios 7 GPIO_ACTIVE_HIGH>;
+		enable-active-high;
+		pinctrl-0 = <&wcd_eldo2_en>;
+		pinctrl-names = "default";
+	};
+
+	sound-wcd {
+		compatible = "qcom,apq8096-sndcard";
+		model = "ef71-tasha";
+		widgets = "Microphone", "Handset Mic",
+			  "Microphone", "Headset Mic",
+			  "Microphone", "Secondary Mic",
+			  "Speaker", "Loudspeaker";
+		audio-routing = "RX_BIAS", "MCLK",
+				"SpkrLeft IN", "SPK1 OUT",
+				"Loudspeaker", "SpkrLeft SPKR",
+				"ADC2", "MCLK",
+				"ADC3", "MCLK",
+				"ADC4", "MCLK",
+				"AMIC2", "MIC BIAS2",
+				"AMIC2", "Headset Mic",
+				"AMIC3", "MIC BIAS1",
+				"AMIC3", "Handset Mic",
+				"AMIC4", "MIC BIAS3",
+				"AMIC4", "Secondary Mic";
+
+		mm1-dai-link {
+			link-name = "MultiMedia1";
+
+			cpu {
+				sound-dai = <&q6asmdai MSM_FRONTEND_DAI_MULTIMEDIA1>;
+			};
+		};
+
+		mm2-dai-link {
+			link-name = "MultiMedia2";
+
+			cpu {
+				sound-dai = <&q6asmdai MSM_FRONTEND_DAI_MULTIMEDIA2>;
+			};
+		};
+
+		mm3-dai-link {
+			link-name = "MultiMedia3";
+
+			cpu {
+				sound-dai = <&q6asmdai MSM_FRONTEND_DAI_MULTIMEDIA3>;
+			};
+		};
+
+		slim-dai-link {
+			link-name = "SLIM Playback";
+
+			cpu {
+				sound-dai = <&q6afedai SLIMBUS_0_RX>;
+			};
+
+			platform {
+				sound-dai = <&q6routing>;
+			};
+
+			codec {
+				/* Amplifier first: the master allocates its ports */
+				sound-dai = <&wsa8810>,
+					    <&swm 0>,
+					    <&wcd9335 AIF1_PB>;
+			};
+		};
+
+		slimcap-dai-link {
+			link-name = "SLIM Capture";
+
+			cpu {
+				sound-dai = <&q6afedai SLIMBUS_0_TX>;
+			};
+
+			platform {
+				sound-dai = <&q6routing>;
+			};
+
+			codec {
+				sound-dai = <&wcd9335 AIF1_CAP>;
+			};
+		};
+
+		/*
+		 * FM receiver audio from the WCNSS FM core, which the ADSP
+		 * gets on the internal FM port. There is no codec on this
+		 * path, the link gets the dummy codec.
+		 */
+		int-fm-cap-dai-link {
+			link-name = "INT_FM Capture";
+
+			cpu {
+				sound-dai = <&q6afedai INT_FM_TX>;
+			};
+
+			platform {
+				sound-dai = <&q6routing>;
+			};
+		};
+	};
+};
+
+&soc {
+	slimbam: dma-controller@c104000 {
+		compatible = "qcom,bam-v1.7.0";
+		qcom,controlled-remotely;
+		reg = <0x0c104000 0x2a000>;
+		num-channels = <23>;
+		interrupts = <GIC_SPI 180 IRQ_TYPE_LEVEL_HIGH>;
+		#dma-cells = <1>;
+		qcom,ee = <1>;
+		qcom,num-ees = <2>;
+	};
+
+	slim_msm: slim-ngd@c140000 {
+		compatible = "qcom,slim-ngd-v1.5.0";
+		reg = <0x0c140000 0x2c000>;
+		interrupts = <GIC_SPI 163 IRQ_TYPE_LEVEL_HIGH>;
+		dmas = <&slimbam 3>, <&slimbam 4>;
+		dma-names = "rx", "tx";
+		#address-cells = <1>;
+		#size-cells = <0>;
+
+		slim@1 {
+			reg = <1>;
+			#address-cells = <2>;
+			#size-cells = <0>;
+
+			tasha_ifd: tas-ifd@0,0 {
+				compatible = "slim217,1a0";
+				reg = <0 0>;
+			};
+
+			wcd9335: codec@1,0 {
+				compatible = "slim217,1a0";
+				reg = <1 0>;
+
+				clock-names = "mclk", "slimbus";
+				clocks = <&wcd_mclk>,
+					 <&rpmcc RPM_SMD_BB_CLK1>;
+				interrupt-parent = <&tlmm>;
+				interrupts = <73 IRQ_TYPE_LEVEL_HIGH>;
+				interrupt-names = "intr1";
+				interrupt-controller;
+				#interrupt-cells = <1>;
+
+				pinctrl-0 = <&wcd_reset_default &wcd_intr_default>;
+				pinctrl-names = "default";
+
+				reset-gpios = <&tlmm 68 GPIO_ACTIVE_LOW>;
+				slim-ifc-dev = <&tasha_ifd>;
+
+				#sound-dai-cells = <1>;
+
+				/*
+				 * Headset jack: the HPHL and GND switches are
+				 * normally open, the button thresholds are those
+				 * of the stock MBHC calibration.
+				 */
+				qcom,mbhc-buttons-vthreshold-microvolt =
+					<75000 150000 237000 450000
+					 450000 450000 450000 450000>;
+
+				vdd-buck-supply = <&wcd_eldo2>;
+				vdd-buck-sido-supply = <&wcd_eldo2>;
+				vdd-tx-supply = <&pm8937_l5>;
+				vdd-rx-supply = <&pm8937_l5>;
+				vdd-io-supply = <&pm8937_l5>;
+
+				#clock-cells = <0>;
+				#address-cells = <1>;
+				#size-cells = <1>;
+
+				/* The loudspeaker amplifier hangs off this master */
+				swm: soundwire@c29 {
+					compatible = "qcom,soundwire-v1.3.0";
+					reg = <0xc29 0x12>;
+					interrupts-extended = <&wcd9335 20>;
+
+					qcom,dout-ports = <6>;
+					qcom,din-ports = <2>;
+					qcom,ports-sinterval-low = /bits/ 8 <0x07 0x1f 0x3f 0x07 0x1f 0x3f 0x0f 0x0f>;
+					qcom,ports-offset1 = /bits/ 8 <0x01 0x02 0x0c 0x06 0x12 0x0d 0x07 0x0a>;
+					qcom,ports-offset2 = /bits/ 8 <0x00 0x00 0x1f 0x00 0x00 0x1f 0x00 0x00>;
+
+					clocks = <&wcd9335>;
+					clock-names = "iface";
+
+					#sound-dai-cells = <1>;
+					#address-cells = <2>;
+					#size-cells = <0>;
+
+					wsa8810: speaker@0,1 {
+						compatible = "sdw10217201000";
+						reg = <0 1>;
+						/* SD_N: low shuts the amplifier down */
+						powerdown-gpios = <&tlmm 96 GPIO_ACTIVE_LOW>;
+						sound-name-prefix = "SpkrLeft";
+						#sound-dai-cells = <0>;
+					};
+				};
+			};
+		};
+	};
+};
+
+&apr {
+	status = "okay";
+};
+
+&q6afedai {
+	dai@2 {
+		reg = <SLIMBUS_0_RX>;
+	};
+
+	dai@3 {
+		reg = <SLIMBUS_0_TX>;
+	};
+
+	dai@99 {
+		reg = <INT_FM_TX>;
+	};
+};
+
+&pm8937_gpios {
+	wcd_mclk_out: wcd-mclk-out-state {
+		pins = "gpio1";
+		function = PMIC_GPIO_FUNC_FUNC1;
+		output-low;
+		bias-disable;
+		power-source = <0>;
+		qcom,drive-strength = <PMIC_GPIO_STRENGTH_LOW>;
+	};
+
+	wcd_eldo2_en: wcd-eldo2-en-state {
+		pins = "gpio7";
+		function = PMIC_GPIO_FUNC_NORMAL;
+		bias-disable;
+		power-source = <0>;
+	};
+};
+
+&rpmcc {
+	pinctrl-0 = <&wcd_mclk_out>;
+	pinctrl-names = "default";
+};
+
+&tlmm {
+	wcd_reset_default: wcd-reset-default-state {
+		pins = "gpio68";
+		function = "gpio";
+		drive-strength = <16>;
+		bias-disable;
+		output-high;
+	};
+
+	wcd_intr_default: wcd-intr-default-state {
+		pins = "gpio73";
+		function = "gpio";
+		drive-strength = <2>;
+		bias-pull-down;
+		input-enable;
+	};
+};

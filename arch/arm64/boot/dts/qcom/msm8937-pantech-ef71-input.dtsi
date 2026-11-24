@@ -1,0 +1,85 @@
+// SPDX-License-Identifier: GPL-2.0-only
+/*
+ * EF71 input: the touchscreen on BLSP1 I2C3 and the wheel key.
+ */
+
+#include <dt-bindings/gpio/gpio.h>
+#include <dt-bindings/input/atmel-maxtouch.h>
+#include <dt-bindings/input/linux-event-codes.h>
+#include <dt-bindings/interrupt-controller/irq.h>
+
+/ {
+	gpio-keys {
+		compatible = "gpio-keys";
+
+		pinctrl-0 = <&gpio_keys_default>;
+		pinctrl-names = "default";
+
+		/* The key under the volume wheel */
+		key-wheel {
+			label = "Wheel Key";
+			linux,code = <KEY_MENU>;
+			gpios = <&tlmm 126 GPIO_ACTIVE_LOW>;
+			debounce-interval = <15>;
+		};
+	};
+
+	/* Touch controller I/O supply, switched by GPIO 39 */
+	ts_iovdd: ts-iovdd-regulator {
+		compatible = "regulator-fixed";
+		regulator-name = "ts_iovdd";
+		regulator-min-microvolt = <1800000>;
+		regulator-max-microvolt = <1800000>;
+		gpio = <&tlmm 39 GPIO_ACTIVE_HIGH>;
+		enable-active-high;
+		startup-delay-us = <10000>;
+
+		pinctrl-0 = <&ts_iovdd_default>;
+		pinctrl-names = "default";
+	};
+};
+
+&blsp1_i2c3 {
+	status = "okay";
+	/* 400 kHz as the stock kernel (100 kHz without it): the touchscreen
+	 * reports are read four times as fast
+	 */
+	clock-frequency = <400000>;
+
+	/* EF71S: Atmel mXT641T; the EF71AS has an FT8716 on the same pins */
+	touchscreen@4a {
+		compatible = "atmel,maxtouch";
+		reg = <0x4a>;
+
+		interrupts-extended = <&tlmm 65 IRQ_TYPE_LEVEL_LOW>;
+		reset-gpios = <&tlmm 64 GPIO_ACTIVE_LOW>;
+		vdd-supply = <&ts_iovdd>;
+		atmel,wakeup-method = <ATMEL_MXT_WAKEUP_I2C_SCL>;
+
+		pinctrl-0 = <&ts_int_rst_default>;
+		pinctrl-names = "default";
+	};
+};
+
+&tlmm {
+	gpio_keys_default: gpio-keys-default-state {
+		pins = "gpio126";
+		function = "gpio";
+		drive-strength = <2>;
+		bias-pull-up;
+	};
+
+	ts_int_rst_default: ts-int-rst-default-state {
+		pins = "gpio64", "gpio65";
+		function = "gpio";
+		drive-strength = <8>;
+		bias-pull-up;
+	};
+
+	ts_iovdd_default: ts-iovdd-default-state {
+		pins = "gpio39";
+		function = "gpio";
+		drive-strength = <2>;
+		bias-disable;
+	};
+};
