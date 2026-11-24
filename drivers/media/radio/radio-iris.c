@@ -664,7 +664,7 @@ int radio_hci_recv_frame(struct sk_buff *skb)
 	}
 	hdev = (struct radio_hci_dev *) skb->dev;
 	if (unlikely(!hdev)) {
-		FMDERR("%s hdev is null while receiving frame\n", hdev->name);
+		FMDERR("hdev is null while receiving frame\n");
 		kfree_skb(skb);
 		return -ENXIO;
 	}
