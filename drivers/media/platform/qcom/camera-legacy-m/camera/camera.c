@@ -608,6 +608,7 @@ static int camera_v4l2_vb2_q_init(struct file *filep)
 	q->type = V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE;
 	q->io_modes = VB2_USERPTR;
 	q->buf_struct_size = sizeof(struct msm_vb2_buffer);
+	q->max_num_buffers = MSM_CAMERA_MAX_FRAME;
 	q->timestamp_flags = V4L2_BUF_FLAG_TIMESTAMP_MONOTONIC;
 	/* vb2 needs the lock the ioctls below hold around their vb2 calls */
 	q->lock = &sp->lock;
