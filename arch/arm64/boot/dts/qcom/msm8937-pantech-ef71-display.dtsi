@@ -12,6 +12,14 @@
 	status = "okay";
 };
 
+/*
+ * No 19.2 MHz level, as on the stock kernel (216 MHz the lowest): from
+ * there simple_ondemand takes frames of polling to bring the GPU up.
+ */
+&gpu_opp_table {
+	/delete-node/ opp-19200000;
+};
+
 &mdss {
 	status = "okay";
 };
