@@ -333,6 +333,8 @@ struct wcd9335_codec {
 
 	struct wcd_slim_codec_dai_data dai[NUM_CODEC_DAIS];
 	struct snd_soc_component *component;
+	/* releases the TX hold of the ADCs once their decimators run */
+	struct delayed_work tx_hold_work;
 
 	int master_bias_users;
 	int clk_mclk_users;
@@ -2772,10 +2774,25 @@ static u16 wcd9335_codec_get_amic_pwlvl_reg(struct snd_soc_component *comp,
 	return pwr_level_reg;
 }
 
+static void wcd9335_tx_hold_work(struct work_struct *work)
+{
+	struct wcd9335_codec *wcd = container_of(to_delayed_work(work),
+						 struct wcd9335_codec,
+						 tx_hold_work);
+	struct snd_soc_component *comp = wcd->component;
+	u16 reg;
+
+	/* the ADCs powered up (bit 7) */
+	for (reg = WCD9335_ANA_AMIC1; reg <= WCD9335_ANA_AMIC6; reg++)
+		if (snd_soc_component_read(comp, reg) & 0x80)
+			wcd9335_codec_set_tx_hold(comp, reg, false);
+}
+
 static int wcd9335_codec_enable_dec(struct snd_soc_dapm_widget *w,
 	struct snd_kcontrol *kc, int event)
 {
 	struct snd_soc_component *comp = snd_soc_dapm_to_component(w->dapm);
+	struct wcd9335_codec *wcd = dev_get_drvdata(comp->dev);
 	unsigned int decimator;
 	char *dec_adc_mux_name = NULL;
 	char *widget_name;
@@ -2876,6 +2893,14 @@ static int wcd9335_codec_enable_dec(struct snd_soc_dapm_widget *w,
 
 		snd_soc_component_update_bits(comp, hpf_gate_reg,
 						0x01, 0x01);
+		/*
+		 * Release the TX hold the ADC was powered up with once the
+		 * decimator runs, as the vendor driver does: held, an ADC whose
+		 * hold bit is its own (AMIC2, AMIC4, AMIC6) kept giving
+		 * silence. Later, as DAPM powers the ADC after the decimator.
+		 */
+		schedule_delayed_work(&wcd->tx_hold_work,
+				      msecs_to_jiffies(300));
 		snd_soc_component_update_bits(comp, tx_vol_ctl_reg,
 						0x10, 0x00);
 		snd_soc_component_write(comp, tx_gain_ctl_reg,
@@ -5573,6 +5598,7 @@ static int wcd9335_codec_probe(struct snd_soc_component *component)
 	/* Default HPH Mode to Class-H HiFi */
 	wcd->hph_mode = CLS_H_HIFI;
 	wcd->component = component;
+	INIT_DELAYED_WORK(&wcd->tx_hold_work, wcd9335_tx_hold_work);
 
 	wcd9335_codec_init(component);
 
@@ -5597,6 +5623,7 @@ static void wcd9335_codec_remove(struct snd_soc_component *comp)
 {
 	struct wcd9335_codec *wcd = dev_get_drvdata(comp->dev);
 
+	cancel_delayed_work_sync(&wcd->tx_hold_work);
 	wcd9335_mbhc_deinit(comp);
 	wcd_clsh_ctrl_free(wcd->clsh_ctrl);
 	wcd9335_teardown_irqs(wcd);
