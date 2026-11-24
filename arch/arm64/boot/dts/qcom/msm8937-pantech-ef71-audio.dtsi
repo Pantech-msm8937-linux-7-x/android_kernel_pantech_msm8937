@@ -202,6 +202,9 @@
 					<75000 150000 237000 450000
 					 450000 450000 450000 450000>;
 
+				/* the headset micbias of the stock kernel */
+				qcom,micbias2-microvolt = <2500000>;
+
 				vdd-buck-supply = <&wcd_eldo2>;
 				vdd-buck-sido-supply = <&wcd_eldo2>;
 				vdd-tx-supply = <&pm8937_l5>;
