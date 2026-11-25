@@ -54,7 +54,8 @@ static inline const char *q6mvm_session_name(enum q6voice_path_type path)
 	case Q6VOICE_PATH_VOIP:
 		return "10004000";
 	case Q6VOICE_PATH_VOLTE:
-		return "10C02000";
+		/* The name the modem gives its VoLTE session, not the VSID */
+		return "default volte voice";
 	case Q6VOICE_PATH_VOICE2:
 		return "10DC1000";
 	case Q6VOICE_PATH_QCHAT:
