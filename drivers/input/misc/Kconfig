@@ -358,6 +358,17 @@ config INPUT_GPIO_BEEPER
 	  To compile this driver as a module, choose M here: the
 	  module will be called gpio-beeper.
 
+config INPUT_ALPS_EC05E
+	tristate "ALPS EC05E rotary encoder wheel"
+	depends on GPIOLIB || COMPILE_TEST
+	help
+	  Say Y here to support the ALPS EC05E rotary encoder on two GPIOs,
+	  the volume wheel of the Pantech VEGA IRON 2 (EF71), which reports
+	  a key for each detent in either direction.
+
+	  To compile this driver as a module, choose M here: the
+	  module will be called alps-ec05e.
+
 config INPUT_GPIO_DECODER
 	tristate "Polled GPIO Decoder Input driver"
 	depends on GPIOLIB || COMPILE_TEST
