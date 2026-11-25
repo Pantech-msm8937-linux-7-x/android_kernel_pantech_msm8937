@@ -1,0 +1,58 @@
+# SPDX-License-Identifier: (GPL-2.0-only OR BSD-2-Clause)
+%YAML 1.2
+---
+$id: http://devicetree.org/schemas/input/alps,ec05e.yaml#
+$schema: http://devicetree.org/meta-schemas/core.yaml#
+
+title: ALPS EC05E rotary encoder wheel
+
+maintainers:
+  - hiru <rlawoehd187@naver.com>
+
+description:
+  A rotary encoder with two terminals on GPIOs, such as the volume wheel of
+  the Pantech VEGA IRON 2. Each detent reports a key press and release, of
+  one key for clockwise turns and another for counterclockwise turns.
+
+allOf:
+  - $ref: input.yaml#
+
+properties:
+  compatible:
+    const: alps,ec05e
+
+  a-gpios:
+    maxItems: 1
+    description: Terminal A, which leads the detent when turning clockwise
+
+  b-gpios:
+    maxItems: 1
+    description: Terminal B, which leads the detent when turning counterclockwise
+
+  linux,keycodes:
+    minItems: 2
+    maxItems: 2
+    description:
+      The key of clockwise and of counterclockwise turns, KEY_VOLUMEDOWN and
+      KEY_VOLUMEUP when absent.
+
+  wakeup-source: true
+
+required:
+  - compatible
+  - a-gpios
+  - b-gpios
+
+unevaluatedProperties: false
+
+examples:
+  - |
+    #include <dt-bindings/gpio/gpio.h>
+    #include <dt-bindings/input/input.h>
+
+    wheel {
+        compatible = "alps,ec05e";
+        a-gpios = <&tlmm 128 GPIO_ACTIVE_LOW>;
+        b-gpios = <&tlmm 127 GPIO_ACTIVE_LOW>;
+        linux,keycodes = <KEY_VOLUMEDOWN KEY_VOLUMEUP>;
+    };
