@@ -94,7 +94,8 @@ struct vss_ivocproc_cmd_create_full_control_session_v2_cmd {
 struct q6voice_session *q6cvp_session_create(enum q6voice_path_type path,
 					     u16 tx_port, u16 rx_port)
 {
-	struct vss_ivocproc_cmd_create_full_control_session_v2_cmd cmd;
+	/* Zeroed: the optional session name stays empty */
+	struct vss_ivocproc_cmd_create_full_control_session_v2_cmd cmd = { };
 
 	cmd.hdr.pkt_size = sizeof(cmd);
 	cmd.hdr.opcode = VSS_IVOCPROC_CMD_CREATE_FULL_CONTROL_SESSION_V2;
