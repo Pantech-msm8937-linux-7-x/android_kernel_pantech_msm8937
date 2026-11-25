@@ -783,8 +783,8 @@ static int venc_set_properties(struct venus_inst *inst)
 		if (ret)
 			return ret;
 
-		/* The HFI of the 1xx and 3xx firmware has no such property */
-		if (!IS_V1(inst->core) && !IS_V3(inst->core)) {
+		/* The HFI of the 1xx firmware has no such property */
+		if (!IS_V1(inst->core)) {
 			ptype = HFI_PROPERTY_PARAM_VENC_H264_TRANSFORM_8X8;
 			h264_transform.enable_type = 0;
 			if (ctr->profile.h264 == V4L2_MPEG_VIDEO_H264_PROFILE_HIGH ||
