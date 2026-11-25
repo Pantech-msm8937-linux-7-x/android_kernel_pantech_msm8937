@@ -14,6 +14,7 @@
 #include <dt-bindings/pinctrl/qcom,pmic-gpio.h>
 #include <dt-bindings/sound/qcom,q6afe.h>
 #include <dt-bindings/sound/qcom,q6asm.h>
+#include <dt-bindings/sound/qcom,q6voice.h>
 #include <dt-bindings/sound/qcom,wcd9335.h>
 
 /*
@@ -84,6 +85,35 @@
 
 			cpu {
 				sound-dai = <&q6asmdai MSM_FRONTEND_DAI_MULTIMEDIA3>;
+			};
+		};
+
+		/*
+		 * Voice calls: the modem and the ADSP carry the audio between
+		 * themselves, the front end only starts the session the modem
+		 * names for the call (VoLTE calls use their own one).
+		 */
+		voicemmode1-dai-link {
+			link-name = "VoiceMMode1";
+
+			cpu {
+				sound-dai = <&q6voicedai VOICEMMODE1>;
+			};
+		};
+
+		volte-dai-link {
+			link-name = "VoLTE";
+
+			cpu {
+				sound-dai = <&q6voicedai VOLTE>;
+			};
+		};
+
+		cs-voice-dai-link {
+			link-name = "CS-Voice";
+
+			cpu {
+				sound-dai = <&q6voicedai CS_VOICE>;
 			};
 		};
 
