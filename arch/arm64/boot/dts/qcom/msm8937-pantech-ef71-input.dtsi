@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
- * EF71 input: the touchscreen on BLSP1 I2C3 and the wheel key.
+ * EF71 input: the touchscreen on BLSP1 I2C3, the volume wheel and the key
+ * under it.
  *
  * Copyright (c) 2026, hiru <rlawoehd187@naver.com>
  */
@@ -24,6 +25,17 @@
 			gpios = <&tlmm 126 GPIO_ACTIVE_LOW>;
 			debounce-interval = <15>;
 		};
+	};
+
+	/* The volume wheel: an ALPS EC05E with its terminals on GPIOs 128 and 127 */
+	wheel {
+		compatible = "alps,ec05e";
+		a-gpios = <&tlmm 128 GPIO_ACTIVE_LOW>;
+		b-gpios = <&tlmm 127 GPIO_ACTIVE_LOW>;
+		linux,keycodes = <KEY_VOLUMEDOWN KEY_VOLUMEUP>;
+
+		pinctrl-0 = <&wheel_default>;
+		pinctrl-names = "default";
 	};
 
 	/* Touch controller I/O supply, switched by GPIO 39 */
@@ -66,6 +78,13 @@
 &tlmm {
 	gpio_keys_default: gpio-keys-default-state {
 		pins = "gpio126";
+		function = "gpio";
+		drive-strength = <2>;
+		bias-pull-up;
+	};
+
+	wheel_default: wheel-default-state {
+		pins = "gpio127", "gpio128";
 		function = "gpio";
 		drive-strength = <2>;
 		bias-pull-up;
