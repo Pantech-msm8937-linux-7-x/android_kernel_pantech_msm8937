@@ -342,9 +342,28 @@ static int q6voice_reg_write(struct snd_soc_component *component,
 	return 0;
 }
 
+/* The DAI IDs of the bindings leave gaps, look the DAI up by its ID */
+static int q6voice_dai_of_xlate_dai_name(struct snd_soc_component *component,
+					 const struct of_phandle_args *args,
+					 const char **dai_name)
+{
+	unsigned int id = args->args[0];
+	int i;
+
+	for (i = 0; i < ARRAY_SIZE(q6voice_dais); i++) {
+		if (q6voice_dais[i].id == id) {
+			*dai_name = q6voice_dais[i].name;
+			return 0;
+		}
+	}
+
+	return -EINVAL;
+}
+
 static const struct snd_soc_component_driver q6voice_dai_component = {
 	.name = DRV_NAME,
 	.open = q6voice_dai_open,
+	.of_xlate_dai_name = q6voice_dai_of_xlate_dai_name,
 
 	.dapm_widgets = q6voice_dapm_widgets,
 	.num_dapm_widgets = ARRAY_SIZE(q6voice_dapm_widgets),
