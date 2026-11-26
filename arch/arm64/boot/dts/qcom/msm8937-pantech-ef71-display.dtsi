@@ -50,7 +50,7 @@
 	status = "okay";
 
 	/* EF71S; the EF71AS carries an FT8716 video mode panel instead */
-	panel@0 {
+	panel: panel@0 {
 		compatible = "pantech,ef71-nt35695";
 		reg = <0>;
 

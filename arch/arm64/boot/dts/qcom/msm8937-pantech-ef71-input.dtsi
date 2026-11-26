@@ -70,6 +70,9 @@
 		vdd-supply = <&ts_iovdd>;
 		atmel,wakeup-method = <ATMEL_MXT_WAKEUP_I2C_SCL>;
 
+		/* screen on/off, and double tap to wake keeping it awake */
+		panel = <&panel>;
+
 		pinctrl-0 = <&ts_int_rst_default>;
 		pinctrl-names = "default";
 	};
