@@ -934,8 +934,14 @@ static int wsa881x_spkr_pa_event(struct snd_soc_dapm_widget *w,
 		regmap_multi_reg_write(wsa881x->regmap, wsa881x_pre_pmu_pa_2_0,
 				       ARRAY_SIZE(wsa881x_pre_pmu_pa_2_0));
 
+		/*
+		 * With the compander port the gain follows the compander of
+		 * the codec, else the register
+		 */
 		snd_soc_component_update_bits(comp, WSA881X_SPKR_DRV_GAIN,
 					      WSA881X_PA_GAIN_SEL_MASK,
+					      wsa881x->port_enable[WSA881X_PORT_COMP] ?
+					      WSA881X_PA_GAIN_SEL_DRE :
 					      WSA881X_PA_GAIN_SEL_REG);
 		break;
 	case SND_SOC_DAPM_POST_PMU:
@@ -943,7 +949,8 @@ static int wsa881x_spkr_pa_event(struct snd_soc_dapm_widget *w,
 		 * The power up sequence leaves the PA at 12 dB: ramp it to the
 		 * gain asked for, as the vendor driver does
 		 */
-		wsa881x_ramp_pa_gain(comp, wsa881x->pa_gain);
+		if (!wsa881x->port_enable[WSA881X_PORT_COMP])
+			wsa881x_ramp_pa_gain(comp, wsa881x->pa_gain);
 
 		if (wsa881x->port_prepared[WSA881X_PORT_VISENSE]) {
 			wsa881x_visense_txfe_ctrl(comp, true);
