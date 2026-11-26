@@ -24,6 +24,7 @@
 #include <linux/input/touchscreen.h>
 #include <linux/irq.h>
 #include <linux/kernel.h>
+#include <linux/pm_wakeup.h>
 #include <linux/module.h>
 #include <linux/property.h>
 #include <linux/ratelimit.h>
@@ -33,6 +34,8 @@
 #include <linux/uaccess.h>
 
 #include <linux/unaligned.h>
+
+#include <drm/drm_panel.h>
 
 #define WORK_REGISTER_THRESHOLD		0x00
 #define WORK_REGISTER_REPORT_RATE	0x08
@@ -62,6 +65,12 @@
 #define WORK_REGISTER_OPMODE		0x3c
 #define FACTORY_REGISTER_OPMODE		0x01
 #define PMOD_REGISTER_OPMODE		0xa5
+
+/* FocalTech in-cell gesture registers (FT8716) */
+#define EDT_GESTURE_EN			0xd0
+#define EDT_GESTURE_TYPES		0xd1
+#define EDT_GESTURE_ID			0xd3
+#define EDT_GESTURE_DOUBLE_TAP		0x24
 
 #define TOUCH_EVENT_DOWN		0x00
 #define TOUCH_EVENT_UP			0x01
@@ -146,10 +155,26 @@ struct edt_ft5x06_ts_data {
 	enum edt_ver version;
 	unsigned int crc_errors;
 	unsigned int header_errors;
+
+	/* double tap to wake, on controllers with wake gestures */
+	bool wake_gesture;
+	bool dt2w_enabled;
+	bool dt2w_active;
+
+	/* screen on/off from the panel, see edt_ft5x06_panel_unpreparing() */
+	struct drm_panel_follower panel_follower;
+	bool is_panel_follower;
+	bool screen_off;
+
+	/* system suspend tracking for wake interrupts */
+	bool sys_suspended;
+	struct completion pm_completion;
 };
 
 struct edt_i2c_chip_data {
 	int  max_support_points;
+	/* gesture mode recognises a double tap (registers 0xd0..0xd3) */
+	bool wake_gesture;
 };
 
 static const struct regmap_config edt_ft5x06_i2c_regmap_config = {
@@ -302,6 +327,35 @@ static irqreturn_t edt_ft5x06_ts_isr(int irq, void *dev_id)
 	u8 rdbuf[63];
 	int i, type, x, y, id;
 	int error;
+
+	/*
+	 * A double tap can fire the wake interrupt while the system is
+	 * suspended. The I2C controller is only usable again once the
+	 * system has resumed, so wait for that before reading.
+	 */
+	if (tsdata->sys_suspended) {
+		pm_wakeup_event(dev, 1000);
+		if (!wait_for_completion_timeout(&tsdata->pm_completion,
+						 msecs_to_jiffies(700))) {
+			dev_warn(dev, "timed out waiting for system resume\n");
+			return IRQ_HANDLED;
+		}
+	}
+
+	if (tsdata->dt2w_active) {
+		unsigned int gesture;
+
+		error = regmap_read(tsdata->regmap, EDT_GESTURE_ID, &gesture);
+		if (!error && gesture == EDT_GESTURE_DOUBLE_TAP) {
+			dev_dbg(dev, "double tap wakeup\n");
+			pm_wakeup_event(dev, 1000);
+			input_report_key(tsdata->input, KEY_WAKEUP, 1);
+			input_sync(tsdata->input);
+			input_report_key(tsdata->input, KEY_WAKEUP, 0);
+			input_sync(tsdata->input);
+		}
+		return IRQ_HANDLED;
+	}
 
 	memset(rdbuf, 0, sizeof(rdbuf));
 	error = regmap_bulk_read(tsdata->regmap, tsdata->tdata_cmd, rdbuf,
@@ -554,6 +608,37 @@ static ssize_t crc_errors_show(struct device *dev,
 
 static DEVICE_ATTR_RO(crc_errors);
 
+static ssize_t dt2w_enable_show(struct device *dev,
+				struct device_attribute *attr, char *buf)
+{
+	struct edt_ft5x06_ts_data *tsdata = dev_get_drvdata(dev);
+
+	return sysfs_emit(buf, "%d\n", tsdata->dt2w_enabled);
+}
+
+static ssize_t dt2w_enable_store(struct device *dev,
+				 struct device_attribute *attr,
+				 const char *buf, size_t count)
+{
+	struct edt_ft5x06_ts_data *tsdata = dev_get_drvdata(dev);
+	bool enable;
+	int error;
+
+	error = kstrtobool(buf, &enable);
+	if (error)
+		return error;
+
+	if (!tsdata->wake_gesture || !tsdata->is_panel_follower)
+		return -ENODEV;
+
+	/* Applied on the next screen off */
+	tsdata->dt2w_enabled = enable;
+
+	return count;
+}
+
+static DEVICE_ATTR_RW(dt2w_enable);
+
 static struct attribute *edt_ft5x06_attrs[] = {
 	&edt_ft5x06_attr_gain.dattr.attr,
 	&edt_ft5x06_attr_offset.dattr.attr,
@@ -565,6 +650,7 @@ static struct attribute *edt_ft5x06_attrs[] = {
 	&dev_attr_fw_version.attr,
 	&dev_attr_header_errors.attr,
 	&dev_attr_crc_errors.attr,
+	&dev_attr_dt2w_enable.attr,
 	NULL
 };
 ATTRIBUTE_GROUPS(edt_ft5x06);
@@ -1113,6 +1199,8 @@ static void edt_ft5x06_disable_regulators(void *arg)
 	regulator_disable(data->iovcc);
 }
 
+static const struct drm_panel_follower_funcs edt_ft5x06_panel_follower_funcs;
+
 static int edt_ft5x06_ts_probe(struct i2c_client *client)
 {
 	const struct i2c_device_id *id = i2c_client_get_device_id(client);
@@ -1157,6 +1245,8 @@ static int edt_ft5x06_ts_probe(struct i2c_client *client)
 	}
 
 	tsdata->max_support_points = chip_data->max_support_points;
+	tsdata->wake_gesture = chip_data->wake_gesture;
+	init_completion(&tsdata->pm_completion);
 
 	tsdata->vcc = devm_regulator_get(&client->dev, "vcc");
 	if (IS_ERR(tsdata->vcc))
@@ -1321,6 +1411,22 @@ static int edt_ft5x06_ts_probe(struct i2c_client *client)
 		return error;
 	}
 
+	/* Screen on/off from the panel the touchscreen sits on */
+	if (drm_is_panel_follower(&client->dev)) {
+		tsdata->panel_follower.funcs = &edt_ft5x06_panel_follower_funcs;
+		error = devm_drm_panel_add_follower(&client->dev,
+						    &tsdata->panel_follower);
+		if (error)
+			return dev_err_probe(&client->dev, error,
+					     "failed to follow the panel\n");
+		tsdata->is_panel_follower = true;
+	}
+
+	if (tsdata->wake_gesture && tsdata->is_panel_follower) {
+		input_set_capability(input, EV_KEY, KEY_WAKEUP);
+		device_init_wakeup(&client->dev, true);
+	}
+
 	error = input_register_device(input);
 	if (error)
 		return error;
@@ -1343,15 +1449,11 @@ static void edt_ft5x06_ts_remove(struct i2c_client *client)
 	edt_ft5x06_ts_teardown_debugfs(tsdata);
 }
 
-static int edt_ft5x06_ts_suspend(struct device *dev)
+static int edt_ft5x06_ts_power_off(struct edt_ft5x06_ts_data *tsdata)
 {
-	struct i2c_client *client = to_i2c_client(dev);
-	struct edt_ft5x06_ts_data *tsdata = i2c_get_clientdata(client);
+	struct device *dev = &tsdata->client->dev;
 	struct gpio_desc *reset_gpio = tsdata->reset_gpio;
 	int ret;
-
-	if (device_may_wakeup(dev))
-		return 0;
 
 	if (tsdata->suspend_mode == EDT_PMODE_NOT_SUPPORTED)
 		return 0;
@@ -1386,14 +1488,10 @@ static int edt_ft5x06_ts_suspend(struct device *dev)
 	return 0;
 }
 
-static int edt_ft5x06_ts_resume(struct device *dev)
+static int edt_ft5x06_ts_power_on(struct edt_ft5x06_ts_data *tsdata)
 {
-	struct i2c_client *client = to_i2c_client(dev);
-	struct edt_ft5x06_ts_data *tsdata = i2c_get_clientdata(client);
+	struct device *dev = &tsdata->client->dev;
 	int ret = 0;
-
-	if (device_may_wakeup(dev))
-		return 0;
 
 	if (tsdata->suspend_mode == EDT_PMODE_NOT_SUPPORTED)
 		return 0;
@@ -1448,6 +1546,141 @@ static int edt_ft5x06_ts_resume(struct device *dev)
 	return ret;
 }
 
+static int edt_ft5x06_ts_suspend(struct device *dev)
+{
+	struct edt_ft5x06_ts_data *tsdata = dev_get_drvdata(dev);
+
+	if (tsdata->is_panel_follower) {
+		/*
+		 * Screen on/off comes from the panel: system suspend only has
+		 * to tell the interrupt handler when the I2C bus is unusable.
+		 */
+		reinit_completion(&tsdata->pm_completion);
+		tsdata->sys_suspended = true;
+		return 0;
+	}
+
+	if (device_may_wakeup(dev))
+		return 0;
+
+	return edt_ft5x06_ts_power_off(tsdata);
+}
+
+static int edt_ft5x06_ts_resume(struct device *dev)
+{
+	struct edt_ft5x06_ts_data *tsdata = dev_get_drvdata(dev);
+
+	if (tsdata->is_panel_follower) {
+		tsdata->sys_suspended = false;
+		complete_all(&tsdata->pm_completion);
+		return 0;
+	}
+
+	if (device_may_wakeup(dev))
+		return 0;
+
+	return edt_ft5x06_ts_power_on(tsdata);
+}
+
+/*
+ * Gesture mode, in the sequence of FocalTech's reference driver: enable
+ * every firmware gesture, then gesture mode, and read it back. The FT8716
+ * does not always take it at once.
+ */
+static int edt_ft5x06_dt2w_enter(struct edt_ft5x06_ts_data *tsdata)
+{
+	struct device *dev = &tsdata->client->dev;
+	unsigned int state = 0;
+	int i, error;
+
+	for (i = 0; i < 5; i++) {
+		regmap_write(tsdata->regmap, EDT_GESTURE_TYPES, 0xff);
+		regmap_write(tsdata->regmap, EDT_GESTURE_EN, 0x01);
+		usleep_range(1000, 2000);
+		if (!regmap_read(tsdata->regmap, EDT_GESTURE_EN, &state) &&
+		    state == 0x01)
+			break;
+	}
+	if (state != 0x01)
+		return -EIO;
+
+	error = enable_irq_wake(tsdata->client->irq);
+	if (error)
+		dev_warn(dev, "failed to enable irq wake: %d\n", error);
+
+	tsdata->dt2w_active = true;
+	dev_dbg(dev, "gesture mode armed (try %d)\n", i + 1);
+
+	return 0;
+}
+
+/*
+ * Screen off: called before the panel goes down, while the in-cell
+ * controller still takes the gesture enable. With double tap to wake on, it
+ * keeps scanning in gesture mode and the panel is told to keep its reset
+ * line and supplies up, without which an in-cell controller stops scanning.
+ */
+static int edt_ft5x06_panel_unpreparing(struct drm_panel_follower *follower)
+{
+	struct edt_ft5x06_ts_data *tsdata =
+		container_of(follower, struct edt_ft5x06_ts_data,
+			     panel_follower);
+	struct device *dev = &tsdata->client->dev;
+
+	if (tsdata->screen_off)
+		return 0;
+
+	if (tsdata->dt2w_enabled && edt_ft5x06_dt2w_enter(tsdata))
+		dev_err(dev, "failed to enter gesture mode, sleeping instead\n");
+
+	if (!tsdata->dt2w_active)
+		edt_ft5x06_ts_power_off(tsdata);
+
+	follower->panel->keep_awake = tsdata->dt2w_active;
+	tsdata->screen_off = true;
+
+	return 0;
+}
+
+/* Screen on: called once the panel is powered and initialised again */
+static int edt_ft5x06_panel_prepared(struct drm_panel_follower *follower)
+{
+	struct edt_ft5x06_ts_data *tsdata =
+		container_of(follower, struct edt_ft5x06_ts_data,
+			     panel_follower);
+
+	if (!tsdata->screen_off)
+		return 0;
+
+	if (tsdata->dt2w_active) {
+		tsdata->dt2w_active = false;
+		disable_irq_wake(tsdata->client->irq);
+
+		/* Out of gesture mode by a reset, as FocalTech's driver does */
+		if (tsdata->reset_gpio) {
+			gpiod_set_value_cansleep(tsdata->reset_gpio, 1);
+			msleep(20);
+			gpiod_set_value_cansleep(tsdata->reset_gpio, 0);
+			msleep(200);
+			edt_ft5x06_restore_reg_parameters(tsdata);
+		} else {
+			regmap_write(tsdata->regmap, EDT_GESTURE_EN, 0x00);
+		}
+	} else {
+		edt_ft5x06_ts_power_on(tsdata);
+	}
+
+	follower->panel->keep_awake = false;
+	tsdata->screen_off = false;
+
+	return 0;
+}
+
+static const struct drm_panel_follower_funcs edt_ft5x06_panel_follower_funcs = {
+	.panel_prepared = edt_ft5x06_panel_prepared,
+	.panel_unpreparing = edt_ft5x06_panel_unpreparing,
+};
+
 static DEFINE_SIMPLE_DEV_PM_OPS(edt_ft5x06_ts_pm_ops,
 				edt_ft5x06_ts_suspend, edt_ft5x06_ts_resume);
 
@@ -1477,6 +1710,7 @@ static const struct edt_i2c_chip_data edt_ft8201_data = {
 
 static const struct edt_i2c_chip_data edt_ft8716_data = {
 	.max_support_points = 10,
+	.wake_gesture = true,
 };
 
 static const struct edt_i2c_chip_data edt_ft8719_data = {
