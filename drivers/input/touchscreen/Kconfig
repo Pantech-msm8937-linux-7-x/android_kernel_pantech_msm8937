@@ -130,6 +130,8 @@ config TOUCHSCREEN_AR1021_I2C
 config TOUCHSCREEN_ATMEL_MXT
 	tristate "Atmel mXT I2C Touchscreen"
 	depends on I2C
+	# It follows the panel through DRM, so if DRM=m, this can't be 'y'
+	depends on DRM || !DRM
 	select FW_LOADER
 	help
 	  Say Y here if you have Atmel mXT series I2C touchscreen,

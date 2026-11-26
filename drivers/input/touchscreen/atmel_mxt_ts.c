@@ -27,7 +27,9 @@
 #include <linux/slab.h>
 #include <linux/regulator/consumer.h>
 #include <linux/gpio/consumer.h>
+#include <linux/pm_wakeup.h>
 #include <linux/unaligned.h>
+#include <drm/drm_panel.h>
 #include <media/v4l2-device.h>
 #include <media/v4l2-ioctl.h>
 #include <media/videobuf2-v4l2.h>
@@ -75,6 +77,7 @@
 #define MXT_SPT_MESSAGECOUNT_T44	44
 #define MXT_SPT_CTECONFIG_T46		46
 #define MXT_SPT_DYNAMICCONFIGURATIONCONTAINER_T71 71
+#define MXT_PROCI_GESTUREPROCESSOR_T93	93
 #define MXT_TOUCH_MULTITOUCHSCREEN_T100 100
 
 /* MXT_GEN_MESSAGE_T5 object */
@@ -103,6 +106,38 @@ struct t7_config {
 
 #define MXT_POWER_CFG_RUN		0
 #define MXT_POWER_CFG_DEEPSLEEP		1
+#define MXT_POWER_CFG_GESTURE		2
+
+/*
+ * Acquisition intervals (ms) used while the screen is off and the
+ * controller only has to recognise a double tap. With the T93 tap area
+ * covering the whole screen, the EF71S mXT641T still catches double taps
+ * at 200 ms idle.
+ */
+static unsigned int dt2w_idle_ms = 200;
+module_param(dt2w_idle_ms, uint, 0644);
+MODULE_PARM_DESC(dt2w_idle_ms, "Idle acquisition interval (ms) in gesture mode");
+
+static unsigned int dt2w_active_ms = 35;
+module_param(dt2w_active_ms, uint, 0644);
+MODULE_PARM_DESC(dt2w_active_ms, "Active acquisition interval (ms) in gesture mode");
+
+/* MXT_PROCI_GESTUREPROCESSOR_T93 field */
+#define MXT_T93_CTRL			0
+#define MXT_T93_CTRL_ENABLE		BIT(0)
+#define MXT_T93_CTRL_RPTEN		BIT(1)
+/*
+ * Bounds of the area T93 recognises taps in, two 16-bit min/max pairs.
+ * The EF71S firmware ships with 150..1769 and 150..929, which leaves out
+ * the screen edges and everything below the upper part of its 1080x1920
+ * screen.
+ */
+#define MXT_T93_AREA_MIN1		1
+#define MXT_T93_AREA_MAX2		7
+#define MXT_T93_DOUBLE_TAP		BIT(1)
+
+/* MXT_TOUCH_MULTITOUCHSCREEN_T100 CTRL field */
+#define MXT_T100_CTRL_RPTEN		BIT(1)
 
 /* MXT_TOUCH_MULTI_T9 field */
 #define MXT_T9_CTRL		0
@@ -337,6 +372,23 @@ struct mxt_data {
 	u8 T97_reportid_max;
 	u8 T100_reportid_min;
 	u8 T100_reportid_max;
+	u16 T93_address;
+	u8 T93_reportid;
+
+	/* double tap to wake */
+	bool dt2w_enabled;
+	bool dt2w_active;
+	u8 t93_ctrl;
+	u8 t100_ctrl;
+
+	/* screen on/off from the panel, see mxt_panel_unpreparing() */
+	struct drm_panel_follower panel_follower;
+	bool is_panel_follower;
+	bool screen_off;
+
+	/* system suspend tracking for wake interrupts */
+	bool sys_suspended;
+	struct completion pm_completion;
 
 	/* for fw update in bootloader */
 	struct completion bl_completion;
@@ -1023,6 +1075,22 @@ static void mxt_proc_t100_message(struct mxt_data *data, u8 *message)
 	data->update_input = true;
 }
 
+static void mxt_proc_t93_message(struct mxt_data *data, u8 *message)
+{
+	struct input_dev *input_dev = data->input_dev;
+
+	if (!data->dt2w_active || !(message[1] & MXT_T93_DOUBLE_TAP))
+		return;
+
+	dev_dbg(&data->client->dev, "double tap wakeup\n");
+
+	pm_wakeup_event(&data->client->dev, 1000);
+	input_report_key(input_dev, KEY_WAKEUP, 1);
+	input_sync(input_dev);
+	input_report_key(input_dev, KEY_WAKEUP, 0);
+	input_sync(input_dev);
+}
+
 static int mxt_proc_message(struct mxt_data *data, u8 *message)
 {
 	u8 report_id = message[0];
@@ -1050,6 +1118,8 @@ static int mxt_proc_message(struct mxt_data *data, u8 *message)
 	} else if (report_id >= data->T100_reportid_min &&
 		   report_id <= data->T100_reportid_max) {
 		mxt_proc_t100_message(data, message);
+	} else if (data->T93_reportid && report_id == data->T93_reportid) {
+		mxt_proc_t93_message(data, message);
 	} else if (report_id == data->T19_reportid) {
 		mxt_input_button(data, message);
 		data->update_input = true;
@@ -1221,6 +1291,21 @@ static irqreturn_t mxt_interrupt(int irq, void *dev_id)
 
 	if (!data->object_table)
 		return IRQ_HANDLED;
+
+	/*
+	 * A double tap can fire the wake interrupt while the system is
+	 * suspended. The I2C controller is only usable again once the
+	 * system has resumed, so wait for that before reading messages.
+	 */
+	if (data->sys_suspended) {
+		pm_wakeup_event(&data->client->dev, 1000);
+		if (!wait_for_completion_timeout(&data->pm_completion,
+						 msecs_to_jiffies(700))) {
+			dev_warn(&data->client->dev,
+				 "timed out waiting for system resume\n");
+			return IRQ_HANDLED;
+		}
+	}
 
 	if (data->T44_address) {
 		return mxt_process_messages_t44(data);
@@ -1721,6 +1806,8 @@ static void mxt_free_object_table(struct mxt_data *data)
 	data->T97_reportid_max = 0;
 	data->T100_reportid_min = 0;
 	data->T100_reportid_max = 0;
+	data->T93_address = 0;
+	data->T93_reportid = 0;
 	data->max_reportid = 0;
 }
 
@@ -1807,6 +1894,10 @@ static int mxt_parse_object_table(struct mxt_data *data,
 		case MXT_TOUCH_PTC_KEYS_T97:
 			data->T97_reportid_min = min_id;
 			data->T97_reportid_max = max_id;
+			break;
+		case MXT_PROCI_GESTUREPROCESSOR_T93:
+			data->T93_address = object->start_address;
+			data->T93_reportid = min_id;
 			break;
 		case MXT_TOUCH_MULTITOUCHSCREEN_T100:
 			data->multitouch = MXT_TOUCH_MULTITOUCHSCREEN_T100;
@@ -2132,6 +2223,9 @@ static int mxt_initialize_input_device(struct mxt_data *data)
 
 	input_set_capability(input_dev, EV_KEY, BTN_TOUCH);
 
+	if (data->T93_address)
+		input_set_capability(input_dev, EV_KEY, KEY_WAKEUP);
+
 	/* For single touch */
 	input_set_abs_params(input_dev, ABS_X, 0, data->max_x, 0, 0);
 	input_set_abs_params(input_dev, ABS_Y, 0, data->max_y, 0, 0);
@@ -2296,9 +2390,15 @@ static int mxt_set_t7_power_cfg(struct mxt_data *data, u8 sleep)
 	int error;
 	struct t7_config *new_config;
 	struct t7_config deepsleep = { .active = 0, .idle = 0 };
+	struct t7_config gesture = {
+		.idle = min(dt2w_idle_ms, 254U),
+		.active = min(dt2w_active_ms, 254U),
+	};
 
 	if (sleep == MXT_POWER_CFG_DEEPSLEEP)
 		new_config = &deepsleep;
+	else if (sleep == MXT_POWER_CFG_GESTURE)
+		new_config = &gesture;
 	else
 		new_config = &data->t7_cfg;
 
@@ -3049,14 +3149,46 @@ static ssize_t mxt_update_fw_store(struct device *dev,
 
 static DEVICE_ATTR(fw_version, S_IRUGO, mxt_fw_version_show, NULL);
 static DEVICE_ATTR(hw_version, S_IRUGO, mxt_hw_version_show, NULL);
+static ssize_t mxt_dt2w_enable_show(struct device *dev,
+				    struct device_attribute *attr, char *buf)
+{
+	struct mxt_data *data = dev_get_drvdata(dev);
+
+	return sysfs_emit(buf, "%d\n", data->dt2w_enabled);
+}
+
+static ssize_t mxt_dt2w_enable_store(struct device *dev,
+				     struct device_attribute *attr,
+				     const char *buf, size_t count)
+{
+	struct mxt_data *data = dev_get_drvdata(dev);
+	bool enable;
+	int error;
+
+	error = kstrtobool(buf, &enable);
+	if (error)
+		return error;
+
+	if (!data->T93_address)
+		return -ENODEV;
+
+	/* Applied on the next screen off */
+	data->dt2w_enabled = enable;
+
+	return count;
+}
+
 static DEVICE_ATTR(object, S_IRUGO, mxt_object_show, NULL);
 static DEVICE_ATTR(update_fw, S_IWUSR, NULL, mxt_update_fw_store);
+static DEVICE_ATTR(dt2w_enable, 0664, mxt_dt2w_enable_show,
+		   mxt_dt2w_enable_store);
 
 static struct attribute *mxt_attrs[] = {
 	&dev_attr_fw_version.attr,
 	&dev_attr_hw_version.attr,
 	&dev_attr_object.attr,
 	&dev_attr_update_fw.attr,
+	&dev_attr_dt2w_enable.attr,
 	NULL
 };
 
@@ -3200,6 +3332,8 @@ static const struct dmi_system_id chromebook_T9_suspend_dmi[] = {
 	{ }
 };
 
+static const struct drm_panel_follower_funcs mxt_panel_follower_funcs;
+
 static int mxt_probe(struct i2c_client *client)
 {
 	struct mxt_data *data;
@@ -3244,6 +3378,13 @@ static int mxt_probe(struct i2c_client *client)
 	init_completion(&data->bl_completion);
 	init_completion(&data->reset_completion);
 	init_completion(&data->crc_completion);
+	init_completion(&data->pm_completion);
+
+	/*
+	 * Double tap to wake is off by default: on the EF71S it keeps the
+	 * panel awake while the screen is off. Turn it on with dt2w_enable.
+	 */
+	data->dt2w_enabled = false;
 
 	data->suspend_mode = dmi_check_system(chromebook_T9_suspend_dmi) ?
 		MXT_SUSPEND_T9_CTRL : MXT_SUSPEND_DEEP_SLEEP;
@@ -3294,6 +3435,17 @@ static int mxt_probe(struct i2c_client *client)
 		return error;
 	}
 
+	/* Screen on/off from the panel the touchscreen sits on */
+	if (drm_is_panel_follower(&client->dev)) {
+		data->panel_follower.funcs = &mxt_panel_follower_funcs;
+		error = devm_drm_panel_add_follower(&client->dev,
+						    &data->panel_follower);
+		if (error)
+			return dev_err_probe(&client->dev, error,
+					     "failed to follow the panel\n");
+		data->is_panel_follower = true;
+	}
+
 	error = regulator_bulk_enable(ARRAY_SIZE(data->regulators),
 				      data->regulators);
 	if (error) {
@@ -3337,6 +3489,8 @@ static int mxt_probe(struct i2c_client *client)
 	if (error)
 		goto err_disable_regulators;
 
+	device_init_wakeup(&client->dev, true);
+
 	return 0;
 
 err_disable_regulators:
@@ -3355,6 +3509,173 @@ static void mxt_remove(struct i2c_client *client)
 	regulator_bulk_disable(ARRAY_SIZE(data->regulators),
 			       data->regulators);
 }
+
+/* Lift the fingers that were down, the touch reports stop in gesture mode */
+static void mxt_release_touches(struct mxt_data *data)
+{
+	struct input_dev *input_dev = data->input_dev;
+	int i;
+
+	for (i = 0; i < data->num_touchids; i++) {
+		input_mt_slot(input_dev, i);
+		input_mt_report_slot_inactive(input_dev);
+	}
+	input_report_key(input_dev, BTN_TOUCH, 0);
+	input_sync(input_dev);
+}
+
+static int mxt_dt2w_enter(struct mxt_data *data)
+{
+	struct mxt_object *t93 = mxt_get_object(data,
+						MXT_PROCI_GESTUREPROCESSOR_T93);
+	struct mxt_object *t100 = mxt_get_object(data,
+						 MXT_TOUCH_MULTITOUCHSCREEN_T100);
+	struct device *dev = &data->client->dev;
+	int error;
+
+	if (!t93 || !t100)
+		return -ENODEV;
+
+	error = __mxt_read_reg(data->client, data->T93_address + MXT_T93_CTRL,
+			       1, &data->t93_ctrl);
+	if (error)
+		return error;
+
+	error = __mxt_read_reg(data->client, t100->start_address, 1,
+			       &data->t100_ctrl);
+	if (error)
+		return error;
+
+	/*
+	 * Open the tap area to the whole screen. Which pair is X and which
+	 * is Y is not documented, so use the larger of the two ranges for
+	 * both.
+	 */
+	if (mxt_obj_size(t93) > MXT_T93_AREA_MAX2 + 1) {
+		u16 end = max(data->max_x, data->max_y);
+		/* little endian, starting at MXT_T93_AREA_MIN1 */
+		u8 area[8] = {
+			0, 0, end & 0xff, end >> 8,	/* MIN1, MAX1 */
+			0, 0, end & 0xff, end >> 8,	/* MIN2, MAX2 */
+		};
+
+		error = __mxt_write_reg(data->client, data->T93_address +
+					MXT_T93_AREA_MIN1, sizeof(area), area);
+		if (error)
+			dev_warn(dev, "failed to set the T93 area: %d\n",
+				 error);
+	}
+
+	/* Keep scanning slowly so the gesture processor still sees taps */
+	error = mxt_set_t7_power_cfg(data, MXT_POWER_CFG_GESTURE);
+	if (error)
+		return error;
+
+	/* Touch reports are of no use and would only cause extra wakeups */
+	error = mxt_write_reg(data->client, t100->start_address,
+			      data->t100_ctrl & ~MXT_T100_CTRL_RPTEN);
+	if (error)
+		goto err_restore;
+
+	error = mxt_write_reg(data->client, data->T93_address + MXT_T93_CTRL,
+			      data->t93_ctrl | MXT_T93_CTRL_ENABLE |
+			      MXT_T93_CTRL_RPTEN);
+	if (error)
+		goto err_restore;
+
+	mxt_release_touches(data);
+
+	error = enable_irq_wake(data->irq);
+	if (error)
+		dev_warn(dev, "failed to enable irq wake: %d\n", error);
+
+	data->dt2w_active = true;
+	dev_dbg(dev, "double tap to wake armed\n");
+
+	return 0;
+
+err_restore:
+	mxt_write_reg(data->client, t100->start_address, data->t100_ctrl);
+	mxt_set_t7_power_cfg(data, MXT_POWER_CFG_RUN);
+	return error;
+}
+
+static void mxt_dt2w_exit(struct mxt_data *data)
+{
+	struct mxt_object *t100 = mxt_get_object(data,
+						 MXT_TOUCH_MULTITOUCHSCREEN_T100);
+
+	data->dt2w_active = false;
+	disable_irq_wake(data->irq);
+
+	mxt_write_reg(data->client, data->T93_address + MXT_T93_CTRL,
+		      data->t93_ctrl);
+	if (t100)
+		mxt_write_reg(data->client, t100->start_address,
+			      data->t100_ctrl);
+}
+
+/*
+ * Screen off: called before the panel goes down. With double tap to wake on,
+ * the controller keeps scanning in gesture mode instead of deep sleep, and
+ * the panel is told to stay awake: on the EF71S the mXT641T stops sensing
+ * as soon as the NT35695 panel enters sleep.
+ */
+static int mxt_panel_unpreparing(struct drm_panel_follower *follower)
+{
+	struct mxt_data *data = container_of(follower, struct mxt_data,
+					     panel_follower);
+	struct input_dev *input_dev = data->input_dev;
+
+	if (!input_dev || data->screen_off)
+		return 0;
+
+	scoped_guard(mutex, &input_dev->mutex) {
+		if (input_device_enabled(input_dev) &&
+		    (!data->dt2w_enabled || mxt_dt2w_enter(data)))
+			mxt_stop(data);
+	}
+
+	follower->panel->keep_awake = data->dt2w_active;
+	if (!data->dt2w_active)
+		disable_irq(data->irq);
+	data->screen_off = true;
+
+	return 0;
+}
+
+/* Screen on: called once the panel is powered and initialised again */
+static int mxt_panel_prepared(struct drm_panel_follower *follower)
+{
+	struct mxt_data *data = container_of(follower, struct mxt_data,
+					     panel_follower);
+	struct input_dev *input_dev = data->input_dev;
+	bool irq_enabled;
+
+	if (!input_dev || !data->screen_off)
+		return 0;
+
+	irq_enabled = data->dt2w_active;
+
+	scoped_guard(mutex, &input_dev->mutex) {
+		if (data->dt2w_active)
+			mxt_dt2w_exit(data);
+		if (input_device_enabled(input_dev))
+			mxt_start(data);
+	}
+
+	follower->panel->keep_awake = false;
+	data->screen_off = false;
+	if (!irq_enabled)
+		enable_irq(data->irq);
+
+	return 0;
+}
+
+static const struct drm_panel_follower_funcs mxt_panel_follower_funcs = {
+	.panel_prepared = mxt_panel_prepared,
+	.panel_unpreparing = mxt_panel_unpreparing,
+};
 
 static int mxt_suspend(struct device *dev)
 {
@@ -3394,7 +3715,37 @@ static int mxt_resume(struct device *dev)
 	return 0;
 }
 
-static DEFINE_SIMPLE_DEV_PM_OPS(mxt_pm_ops, mxt_suspend, mxt_resume);
+/*
+ * With the screen on/off coming from the panel, system suspend only has to
+ * tell the interrupt handler when the I2C bus is unusable.
+ */
+static int mxt_pm_suspend(struct device *dev)
+{
+	struct mxt_data *data = i2c_get_clientdata(to_i2c_client(dev));
+
+	if (!data->is_panel_follower)
+		return mxt_suspend(dev);
+
+	reinit_completion(&data->pm_completion);
+	data->sys_suspended = true;
+
+	return 0;
+}
+
+static int mxt_pm_resume(struct device *dev)
+{
+	struct mxt_data *data = i2c_get_clientdata(to_i2c_client(dev));
+
+	if (!data->is_panel_follower)
+		return mxt_resume(dev);
+
+	data->sys_suspended = false;
+	complete_all(&data->pm_completion);
+
+	return 0;
+}
+
+static DEFINE_SIMPLE_DEV_PM_OPS(mxt_pm_ops, mxt_pm_suspend, mxt_pm_resume);
 
 static const struct of_device_id mxt_of_match[] = {
 	{ .compatible = "atmel,maxtouch", },
