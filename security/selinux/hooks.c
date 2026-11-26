@@ -4538,28 +4538,15 @@ static int selinux_kernel_read_file(struct file *file,
 	BUILD_BUG_ON_MSG(READING_MAX_ID > 8,
 			 "New kernel_read_file_id introduced; update SELinux!");
 
+	/*
+	 * Only module loads are checked, as before the firmware_load and the
+	 * other system permissions came in: Android policies do not define
+	 * those, which leaves every firmware load denied under them.
+	 */
 	switch (id) {
-	case READING_FIRMWARE:
-		rc = selinux_kernel_load_from_file(file, SYSTEM__FIRMWARE_LOAD);
-		break;
 	case READING_MODULE:
 	case READING_MODULE_COMPRESSED:
 		rc = selinux_kernel_load_from_file(file, SYSTEM__MODULE_LOAD);
-		break;
-	case READING_KEXEC_IMAGE:
-		rc = selinux_kernel_load_from_file(file,
-						   SYSTEM__KEXEC_IMAGE_LOAD);
-		break;
-	case READING_KEXEC_INITRAMFS:
-		rc = selinux_kernel_load_from_file(file,
-						SYSTEM__KEXEC_INITRAMFS_LOAD);
-		break;
-	case READING_POLICY:
-		rc = selinux_kernel_load_from_file(file, SYSTEM__POLICY_LOAD);
-		break;
-	case READING_X509_CERTIFICATE:
-		rc = selinux_kernel_load_from_file(file,
-						SYSTEM__X509_CERTIFICATE_LOAD);
 		break;
 	default:
 		break;
@@ -4575,28 +4562,10 @@ static int selinux_kernel_load_data(enum kernel_load_data_id id, bool contents)
 	BUILD_BUG_ON_MSG(LOADING_MAX_ID > 8,
 			 "New kernel_load_data_id introduced; update SELinux!");
 
+	/* Only module loads, see selinux_kernel_read_file() */
 	switch (id) {
-	case LOADING_FIRMWARE:
-		rc = selinux_kernel_load_from_file(NULL, SYSTEM__FIRMWARE_LOAD);
-		break;
 	case LOADING_MODULE:
 		rc = selinux_kernel_load_from_file(NULL, SYSTEM__MODULE_LOAD);
-		break;
-	case LOADING_KEXEC_IMAGE:
-		rc = selinux_kernel_load_from_file(NULL,
-						   SYSTEM__KEXEC_IMAGE_LOAD);
-		break;
-	case LOADING_KEXEC_INITRAMFS:
-		rc = selinux_kernel_load_from_file(NULL,
-						SYSTEM__KEXEC_INITRAMFS_LOAD);
-		break;
-	case LOADING_POLICY:
-		rc = selinux_kernel_load_from_file(NULL,
-						   SYSTEM__POLICY_LOAD);
-		break;
-	case LOADING_X509_CERTIFICATE:
-		rc = selinux_kernel_load_from_file(NULL,
-						SYSTEM__X509_CERTIFICATE_LOAD);
 		break;
 	default:
 		break;
