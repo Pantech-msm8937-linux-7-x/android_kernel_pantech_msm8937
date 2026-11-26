@@ -1142,10 +1142,18 @@ static int wsa881x_probe(struct sdw_slave *pdev,
 	/* What the power up sequence sets, until the control asks for more */
 	wsa881x->pa_gain = G_12DB;
 
-	wsa881x->sd_n = devm_gpiod_get_optional(dev, "powerdown", GPIOD_OUT_LOW);
+	/*
+	 * The powerdown GPIO may be shared between several amplifiers. Request
+	 * it asserted, so the shared GPIO proxy treats powerdown as the default
+	 * state and keeps the line de-asserted as long as any amplifier needs
+	 * it, then power up this amplifier.
+	 */
+	wsa881x->sd_n = devm_gpiod_get_optional(dev, "powerdown", GPIOD_OUT_HIGH);
 	if (IS_ERR(wsa881x->sd_n))
 		return dev_err_probe(dev, PTR_ERR(wsa881x->sd_n),
 				     "Shutdown Control GPIO not found\n");
+
+	gpiod_set_value_cansleep(wsa881x->sd_n, 0);
 
 	dev_set_drvdata(dev, wsa881x);
 	wsa881x->slave = pdev;
@@ -1181,7 +1189,7 @@ static int wsa881x_runtime_suspend(struct device *dev)
 	struct regmap *regmap = dev_get_regmap(dev, NULL);
 	struct wsa881x_priv *wsa881x = dev_get_drvdata(dev);
 
-	gpiod_direction_output(wsa881x->sd_n, 1);
+	gpiod_set_value_cansleep(wsa881x->sd_n, 1);
 
 	regcache_cache_only(regmap, true);
 	regcache_mark_dirty(regmap);
@@ -1196,11 +1204,11 @@ static int wsa881x_runtime_resume(struct device *dev)
 	struct wsa881x_priv *wsa881x = dev_get_drvdata(dev);
 	int ret;
 
-	gpiod_direction_output(wsa881x->sd_n, 0);
+	gpiod_set_value_cansleep(wsa881x->sd_n, 0);
 
 	ret = sdw_slave_wait_for_init(slave, WSA881X_PROBE_TIMEOUT);
 	if (ret) {
-		gpiod_direction_output(wsa881x->sd_n, 1);
+		gpiod_set_value_cansleep(wsa881x->sd_n, 1);
 		return ret;
 	}
 
@@ -1209,7 +1217,7 @@ static int wsa881x_runtime_resume(struct device *dev)
 	if (ret) {
 		regcache_cache_only(regmap, true);
 		regcache_mark_dirty(regmap);
-		gpiod_direction_output(wsa881x->sd_n, 1);
+		gpiod_set_value_cansleep(wsa881x->sd_n, 1);
 		return ret;
 	}
 
