@@ -525,6 +525,13 @@ int q6asm_map_memory_regions(unsigned int dir, struct audio_client *ac,
 		}
 	}
 	ac->port[dir].num_periods = periods;
+	/*
+	 * New buffers start at the first one: a stream reopened on them
+	 * (prepare after an underrun) would else go on from the buffer the
+	 * old one stopped at, out of step with the ring of the PCM.
+	 */
+	ac->port[dir].dsp_buf = 0;
+	atomic_set(&ac->port[dir].hw_ptr, 0);
 
 	spin_unlock_irqrestore(&ac->lock, flags);
 
@@ -1572,8 +1579,10 @@ static void q6asm_reset_buf_state(struct audio_client *ac)
 	guard(spinlock_irqsave)(&ac->lock);
 	port = &ac->port[SNDRV_PCM_STREAM_PLAYBACK];
 	port->dsp_buf = 0;
+	atomic_set(&port->hw_ptr, 0);
 	port = &ac->port[SNDRV_PCM_STREAM_CAPTURE];
 	port->dsp_buf = 0;
+	atomic_set(&port->hw_ptr, 0);
 }
 
 static int __q6asm_cmd(struct audio_client *ac, uint32_t stream_id, int cmd,
