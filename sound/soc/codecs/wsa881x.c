@@ -675,6 +675,8 @@ struct wsa881x_priv {
 	bool hw_init;
 	bool port_prepared[WSA881X_MAX_SWR_PORTS];
 	bool port_enable[WSA881X_MAX_SWR_PORTS];
+	/* PA gain step the "PA Volume" control asks for, G_18DB to G_0DB */
+	int pa_gain;
 };
 
 static void wsa881x_init(struct wsa881x_priv *wsa881x)
@@ -735,21 +737,10 @@ static int wsa881x_component_probe(struct snd_soc_component *comp)
 	return 0;
 }
 
-static int wsa881x_put_pa_gain(struct snd_kcontrol *kc,
-			       struct snd_ctl_elem_value *ucontrol)
+static void wsa881x_ramp_pa_gain(struct snd_soc_component *comp, int max_gain)
 {
-	struct snd_soc_component *comp = snd_kcontrol_chip(kc);
-	struct soc_mixer_control *mc =
-			(struct soc_mixer_control *)kc->private_value;
-	int max = mc->max;
-	unsigned int mask = (1 << fls(max)) - 1;
-	int val, ret, min_gain, max_gain;
+	int val, ret, min_gain;
 
-	ret = pm_runtime_resume_and_get(comp->dev);
-	if (ret < 0 && ret != -EACCES)
-		return ret;
-
-	max_gain = (max - ucontrol->value.integer.value[0]) & mask;
 	/*
 	 * Gain has to set incrementally in 4 steps
 	 * as per HW sequence
@@ -774,6 +765,26 @@ static int wsa881x_put_pa_gain(struct snd_kcontrol *kc,
 
 		usleep_range(1000, 1010);
 	}
+}
+
+static int wsa881x_put_pa_gain(struct snd_kcontrol *kc,
+			       struct snd_ctl_elem_value *ucontrol)
+{
+	struct snd_soc_component *comp = snd_kcontrol_chip(kc);
+	struct wsa881x_priv *wsa881x = snd_soc_component_get_drvdata(comp);
+	struct soc_mixer_control *mc =
+			(struct soc_mixer_control *)kc->private_value;
+	int max = mc->max;
+	unsigned int mask = (1 << fls(max)) - 1;
+	int ret;
+
+	ret = pm_runtime_resume_and_get(comp->dev);
+	if (ret < 0 && ret != -EACCES)
+		return ret;
+
+	/* Kept for the PA power up, which starts from a gain of its own */
+	wsa881x->pa_gain = (max - ucontrol->value.integer.value[0]) & mask;
+	wsa881x_ramp_pa_gain(comp, wsa881x->pa_gain);
 
 	pm_runtime_put_autosuspend(comp->dev);
 
@@ -928,6 +939,12 @@ static int wsa881x_spkr_pa_event(struct snd_soc_dapm_widget *w,
 					      WSA881X_PA_GAIN_SEL_REG);
 		break;
 	case SND_SOC_DAPM_POST_PMU:
+		/*
+		 * The power up sequence leaves the PA at 12 dB: ramp it to the
+		 * gain asked for, as the vendor driver does
+		 */
+		wsa881x_ramp_pa_gain(comp, wsa881x->pa_gain);
+
 		if (wsa881x->port_prepared[WSA881X_PORT_VISENSE]) {
 			wsa881x_visense_txfe_ctrl(comp, true);
 			snd_soc_component_update_bits(comp,
@@ -1114,6 +1131,9 @@ static int wsa881x_probe(struct sdw_slave *pdev,
 	wsa881x = devm_kzalloc(dev, sizeof(*wsa881x), GFP_KERNEL);
 	if (!wsa881x)
 		return -ENOMEM;
+
+	/* What the power up sequence sets, until the control asks for more */
+	wsa881x->pa_gain = G_12DB;
 
 	wsa881x->sd_n = devm_gpiod_get_optional(dev, "powerdown", GPIOD_OUT_LOW);
 	if (IS_ERR(wsa881x->sd_n))
