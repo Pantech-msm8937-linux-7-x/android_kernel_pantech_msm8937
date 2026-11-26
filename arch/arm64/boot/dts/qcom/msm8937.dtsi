@@ -2704,6 +2704,8 @@
 		};
 
 		cpuss1-thermal {
+			polling-delay-passive = <250>;
+
 			thermal-sensors = <&tsens 4>;
 
 			cooling-maps {
@@ -2738,6 +2740,8 @@
 		};
 
 		cpu4-thermal {
+			polling-delay-passive = <250>;
+
 			thermal-sensors = <&tsens 5>;
 
 			cooling-maps {
@@ -2772,6 +2776,8 @@
 		};
 
 		cpu5-thermal {
+			polling-delay-passive = <250>;
+
 			thermal-sensors = <&tsens 6>;
 
 			cooling-maps {
@@ -2806,6 +2812,8 @@
 		};
 
 		cpu6-thermal {
+			polling-delay-passive = <250>;
+
 			thermal-sensors = <&tsens 7>;
 
 			cooling-maps {
@@ -2840,6 +2848,8 @@
 		};
 
 		cpu7-thermal {
+			polling-delay-passive = <250>;
+
 			thermal-sensors = <&tsens 8>;
 
 			cooling-maps {
@@ -2874,6 +2884,8 @@
 		};
 
 		cpuss0-thermal {
+			polling-delay-passive = <250>;
+
 			thermal-sensors = <&tsens 9>;
 
 			cooling-maps {
