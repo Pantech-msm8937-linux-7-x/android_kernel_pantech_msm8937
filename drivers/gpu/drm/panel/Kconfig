@@ -780,13 +780,14 @@ config DRM_PANEL_PANASONIC_VVX10F034N00
 	  Xperia Z2 tablets
 
 config DRM_PANEL_PANTECH_EF71_NT35695
-	tristate "Pantech EF71 NT35695 command mode panel"
+	tristate "Pantech EF71 NT35695 and FT8716 panels"
 	depends on OF
 	depends on DRM_MIPI_DSI
 	depends on BACKLIGHT_CLASS_DEVICE
 	help
-	  Say Y here to enable support for the Novatek NT35695 1080p command
-	  mode DSI panel of the Pantech VEGA IRON 2 (EF71S).
+	  Say Y here to enable support for the DSI panels of the Pantech VEGA
+	  IRON 2: the Novatek NT35695 1080p command mode panel of the EF71S
+	  and the FocalTech FT8716 1080p video mode panel of the EF71AS.
 
 config DRM_PANEL_RASPBERRYPI_TOUCHSCREEN
 	tristate "Raspberry Pi 7-inch touchscreen panel"

@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
- * EF71 GPU and display: Adreno 505, MDSS and the NT35695 command mode
- * panel on DSI0.
+ * EF71 GPU and display: Adreno 505, MDSS and the panel on DSI0, the
+ * NT35695 command mode panel of the EF71S or the FT8716 video mode panel of
+ * the EF71AS.
  *
  * Copyright (c) 2026, hiru <rlawoehd187@naver.com>
  */
@@ -49,9 +50,12 @@
 
 	status = "okay";
 
-	/* EF71S; the EF71AS carries an FT8716 video mode panel instead */
+	/*
+	 * NT35695 (EF71S) or FT8716 (EF71AS): the panel driver takes the one
+	 * the bootloader names in mdss_mdp.panel
+	 */
 	panel: panel@0 {
-		compatible = "pantech,ef71-nt35695";
+		compatible = "pantech,ef71-panel";
 		reg = <0>;
 
 		reset-gpios = <&tlmm 60 GPIO_ACTIVE_LOW>;
