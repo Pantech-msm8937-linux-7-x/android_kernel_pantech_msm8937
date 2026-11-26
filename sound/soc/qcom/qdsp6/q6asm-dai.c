@@ -274,6 +274,13 @@ static int q6asm_dai_prepare(struct snd_soc_component *component,
 	}
 
 	prtd->pcm_count = snd_pcm_lib_period_bytes(substream);
+	/*
+	 * Nothing is queued to the DSP yet: the core sets the application
+	 * pointer to the reset hardware one after this, so must the queue.
+	 * Left from before an underrun, the queue pointer lay ahead of the
+	 * application one and the next queueing sent stale periods.
+	 */
+	prtd->queue_ptr = runtime->status->hw_ptr;
 	/* rate and channels are sent to audio driver */
 	if (prtd->state == Q6ASM_STREAM_RUNNING) {
 		/* clear the previous setup if any  */
