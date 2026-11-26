@@ -259,6 +259,19 @@ struct drm_panel {
 	struct mutex follower_lock;
 
 	/**
+	 * @keep_awake:
+	 *
+	 * Set by a follower that senses through the panel, a touch controller
+	 * waiting for a wake gesture, from its panel_unpreparing() callback:
+	 * the panel is to keep up across unprepare what that touch controller
+	 * needs to go on sensing (its reset line and supplies, or not even
+	 * entering sleep), with its display off. What that is depends on the
+	 * panel. Cleared again by the follower once the panel is prepared.
+	 * Panels that do not need it ignore it.
+	 */
+	bool keep_awake;
+
+	/**
 	 * @prepare_prev_first:
 	 *
 	 * The previous controller should be prepared first, before the prepare
