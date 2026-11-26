@@ -71,6 +71,11 @@ static int ef71_nt35695_on(struct ef71_nt35695 *ctx)
 	mipi_dsi_dcs_write_seq_multi(&dsi_ctx, 0xff, 0x10);
 	mipi_dsi_dcs_exit_sleep_mode_multi(&dsi_ctx);
 	mipi_dsi_msleep(&dsi_ctx, 110);
+	/*
+	 * Out of the idle mode (8 colours) double tap to wake leaves it in,
+	 * which the reset does not clear (see ef71_nt35695_off_awake())
+	 */
+	mipi_dsi_dcs_write_seq_multi(&dsi_ctx, MIPI_DCS_EXIT_IDLE_MODE);
 	/* Brightness control and backlight on */
 	mipi_dsi_dcs_write_seq_multi(&dsi_ctx, MIPI_DCS_WRITE_CONTROL_DISPLAY, 0x24);
 	mipi_dsi_dcs_write_seq_multi(&dsi_ctx, 0xff, 0x10);
@@ -90,6 +95,26 @@ static int ef71_nt35695_off(struct ef71_nt35695 *ctx)
 	mipi_dsi_msleep(&dsi_ctx, 150);
 	mipi_dsi_dcs_enter_sleep_mode_multi(&dsi_ctx);
 	mipi_dsi_msleep(&dsi_ctx, 150);
+
+	return dsi_ctx.accum_err;
+}
+
+/*
+ * Display off and idle mode, without the sleep in of the off commands: the
+ * mXT641T stops sensing as soon as the panel sleeps, so this is what the
+ * panel gets while the touch waits for a double tap (keep_awake). Idle mode,
+ * 8 colours, lowers what the awake panel draws; the next prepare resets and
+ * initialises the panel as usual, leaving idle mode explicitly.
+ */
+static int ef71_nt35695_off_awake(struct ef71_nt35695 *ctx)
+{
+	struct mipi_dsi_multi_context dsi_ctx = { .dsi = ctx->dsi };
+
+	ctx->dsi->mode_flags &= ~MIPI_DSI_MODE_LPM;
+
+	mipi_dsi_dcs_set_display_off_multi(&dsi_ctx);
+	mipi_dsi_msleep(&dsi_ctx, 20);
+	mipi_dsi_dcs_write_seq_multi(&dsi_ctx, MIPI_DCS_ENTER_IDLE_MODE);
 
 	return dsi_ctx.accum_err;
 }
@@ -118,11 +143,16 @@ static int ef71_nt35695_unprepare(struct drm_panel *panel)
 	struct device *dev = &ctx->dsi->dev;
 	int ret;
 
-	ret = ef71_nt35695_off(ctx);
+	if (panel->keep_awake)
+		ret = ef71_nt35695_off_awake(ctx);
+	else
+		ret = ef71_nt35695_off(ctx);
 	if (ret < 0)
 		dev_err(dev, "Failed to un-initialize panel: %d\n", ret);
 
-	gpiod_set_value_cansleep(ctx->reset_gpio, 1);
+	/* out of reset, so it keeps driving the touch sensing */
+	if (!panel->keep_awake)
+		gpiod_set_value_cansleep(ctx->reset_gpio, 1);
 
 	return 0;
 }
