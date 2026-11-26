@@ -33,6 +33,10 @@
 #define VSS_IVOCPROC_CMD_TOPOLOGY_SET_DEV_CHANNELS	0x00013199
 #define VSS_IVOCPROC_CMD_TOPOLOGY_COMMIT		0x00013198
 #define VSS_ICOMMON_CMD_SET_PARAM_V2			0x0001133D
+#define VSS_IVOLUME_CMD_MUTE_V2				0x0001138B
+
+#define VSS_IVOLUME_DIRECTION_TX			0
+#define VSS_IVOLUME_MUTE_RAMP_MS			20
 
 #define VSS_MODULE_CVD_GENERIC				0x0001316E
 #define VSS_PARAM_TX_PORT_ENDPOINT_MEDIA_INFO		0x00013253
@@ -244,6 +248,28 @@ struct q6voice_session *q6cvp_session_create(enum q6voice_path_type path,
 	return q6voice_session_create(Q6VOICE_SERVICE_CVP, path, &cmd.hdr);
 }
 EXPORT_SYMBOL_GPL(q6cvp_session_create);
+
+struct vss_ivolume_cmd_mute_v2_cmd {
+	struct apr_hdr hdr;
+	u16 direction;
+	u16 mute_flag;
+	u16 ramp_duration_ms;
+} __packed;
+
+/* Mutes or unmutes the microphone of the call */
+int q6cvp_set_tx_mute(struct q6voice_session *cvp, bool mute)
+{
+	struct vss_ivolume_cmd_mute_v2_cmd cmd = { };
+
+	cmd.hdr.pkt_size = sizeof(cmd);
+	cmd.hdr.opcode = VSS_IVOLUME_CMD_MUTE_V2;
+	cmd.direction = VSS_IVOLUME_DIRECTION_TX;
+	cmd.mute_flag = mute;
+	cmd.ramp_duration_ms = VSS_IVOLUME_MUTE_RAMP_MS;
+
+	return q6voice_common_send(cvp, &cmd.hdr);
+}
+EXPORT_SYMBOL_GPL(q6cvp_set_tx_mute);
 
 int q6cvp_enable(struct q6voice_session *cvp, bool state)
 {

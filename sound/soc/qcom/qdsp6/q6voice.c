@@ -31,6 +31,8 @@ struct q6voice_path {
 struct q6voice {
 	struct device *dev;
 	struct q6voice_path paths[Q6VOICE_PATH_COUNT];
+	/* Microphone of the calls muted, for the running and the next ones */
+	bool tx_mute;
 };
 
 static int q6voice_path_start(struct q6voice_path *p)
@@ -76,6 +78,9 @@ static int q6voice_path_start(struct q6voice_path *p)
 		dev_err(dev, "failed to start voice: %d\n", ret);
 		goto start_err;
 	}
+
+	if (READ_ONCE(p->v->tx_mute) && q6cvp_set_tx_mute(cvp, true))
+		dev_warn(dev, "failed to mute the microphone\n");
 
 	return ret;
 
@@ -259,6 +264,36 @@ void q6voice_set_port(struct q6voice *v, enum q6voice_path_type path,
 		p->rx_port = index;
 }
 EXPORT_SYMBOL_GPL(q6voice_set_port);
+
+bool q6voice_get_tx_mute(struct q6voice *v)
+{
+	return READ_ONCE(v->tx_mute);
+}
+EXPORT_SYMBOL_GPL(q6voice_get_tx_mute);
+
+int q6voice_set_tx_mute(struct q6voice *v, bool mute)
+{
+	enum q6voice_path_type path;
+	int ret = 0;
+
+	WRITE_ONCE(v->tx_mute, mute);
+
+	for (path = 0; path < Q6VOICE_PATH_COUNT; ++path) {
+		struct q6voice_path *p = &v->paths[path];
+
+		mutex_lock(&p->lock);
+		if (p->runtime && p->runtime->started == 3) {
+			int err = q6cvp_set_tx_mute(p->runtime->sessions[Q6VOICE_SERVICE_CVP],
+						    mute);
+			if (err)
+				ret = err;
+		}
+		mutex_unlock(&p->lock);
+	}
+
+	return ret;
+}
+EXPORT_SYMBOL_GPL(q6voice_set_tx_mute);
 
 MODULE_AUTHOR("Stephan Gerhold <stephan@gerhold.net>");
 MODULE_DESCRIPTION("Q6Voice driver");

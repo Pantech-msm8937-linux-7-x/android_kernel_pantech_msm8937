@@ -214,6 +214,36 @@ static int q6voice_put_mixer_playback(struct snd_kcontrol *kcontrol, struct snd_
 	return q6voice_put_mixer(kcontrol, ucontrol, false);
 }
 
+static int q6voice_dai_get_tx_mute(struct snd_kcontrol *kcontrol,
+				   struct snd_ctl_elem_value *ucontrol)
+{
+	struct snd_soc_component *c = snd_kcontrol_chip(kcontrol);
+	struct q6voice *v = snd_soc_component_get_drvdata(c);
+
+	ucontrol->value.integer.value[0] = q6voice_get_tx_mute(v);
+	return 0;
+}
+
+static int q6voice_dai_put_tx_mute(struct snd_kcontrol *kcontrol,
+				   struct snd_ctl_elem_value *ucontrol)
+{
+	struct snd_soc_component *c = snd_kcontrol_chip(kcontrol);
+	struct q6voice *v = snd_soc_component_get_drvdata(c);
+	bool mute = !!ucontrol->value.integer.value[0];
+	int ret;
+
+	if (mute == q6voice_get_tx_mute(v))
+		return 0;
+
+	ret = q6voice_set_tx_mute(v, mute);
+	return ret < 0 ? ret : 1;
+}
+
+static const struct snd_kcontrol_new q6voice_controls[] = {
+	SOC_SINGLE_BOOL_EXT("Voice Tx Mute", 0,
+			    q6voice_dai_get_tx_mute, q6voice_dai_put_tx_mute),
+};
+
 static const struct snd_kcontrol_new cs_voice_tx_mixer_controls[] = {
 	SOC_SINGLE_EXT("PRI_MI2S_TX", PRIMARY_MI2S_TX, CS_VOICE, 1, 0,
 		       q6voice_get_mixer_capture, q6voice_put_mixer_capture),
@@ -436,6 +466,9 @@ static const struct snd_soc_component_driver q6voice_dai_component = {
 	.name = DRV_NAME,
 	.open = q6voice_dai_open,
 	.of_xlate_dai_name = q6voice_dai_of_xlate_dai_name,
+
+	.controls = q6voice_controls,
+	.num_controls = ARRAY_SIZE(q6voice_controls),
 
 	.dapm_widgets = q6voice_dapm_widgets,
 	.num_dapm_widgets = ARRAY_SIZE(q6voice_dapm_widgets),
