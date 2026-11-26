@@ -60,7 +60,31 @@
 	 */
 	clock-frequency = <400000>;
 
-	/* EF71S: Atmel mXT641T; the EF71AS has an FT8716 on the same pins */
+	/*
+	 * EF71S: Atmel mXT641T; the EF71AS has an FT8716 on the same pins.
+	 * Only the one with the panel the bootloader names stays enabled.
+	 */
+	touchscreen@38 {
+		compatible = "focaltech,ft8716";
+		reg = <0x38>;
+
+		interrupts-extended = <&tlmm 65 IRQ_TYPE_EDGE_FALLING>;
+		reset-gpios = <&tlmm 64 GPIO_ACTIVE_LOW>;
+
+		touchscreen-size-x = <1080>;
+		touchscreen-size-y = <1920>;
+		/* The FT8716 reports both axes mirrored */
+		touchscreen-inverted-x;
+		touchscreen-inverted-y;
+
+		/* screen on/off, and double tap to wake keeping it powered */
+		panel = <&panel>;
+		pantech,panel = "ft8716";
+
+		pinctrl-0 = <&ts_int_rst_default>;
+		pinctrl-names = "default";
+	};
+
 	touchscreen@4a {
 		compatible = "atmel,maxtouch";
 		reg = <0x4a>;
@@ -72,6 +96,7 @@
 
 		/* screen on/off, and double tap to wake keeping it awake */
 		panel = <&panel>;
+		pantech,panel = "nt35695";
 
 		pinctrl-0 = <&ts_int_rst_default>;
 		pinctrl-names = "default";
