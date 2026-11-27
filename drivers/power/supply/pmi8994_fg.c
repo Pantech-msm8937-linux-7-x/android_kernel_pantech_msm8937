@@ -624,9 +624,17 @@ static int pmi8994_fg_get_property(struct power_supply *psy,
 
 	switch (psp) {
 	case POWER_SUPPLY_PROP_STATUS:
-		/* Get status from charger if available */
-		if (chip->chg_psy && chip->status != POWER_SUPPLY_STATUS_UNKNOWN) {
-			val->intval = chip->status;
+		/*
+		 * Get status from charger if available, as it is now: the
+		 * charger does not signal every change (termination, the
+		 * inhibit before recharging), which left a stale "not
+		 * charging" behind with a full battery on the charger.
+		 */
+		if (chip->chg_psy &&
+		    !power_supply_get_property(chip->chg_psy,
+					       POWER_SUPPLY_PROP_STATUS, val) &&
+		    val->intval != POWER_SUPPLY_STATUS_UNKNOWN) {
+			/* as the charger has it */
 		} else {
 			/*
 			 * Fall back to capacity and current-based
