@@ -765,11 +765,13 @@ static int mdp5_crtc_atomic_check(struct drm_crtc *crtc,
 	start = get_start_stage(crtc, crtc_state, &pstates[0].state->base);
 
 	/* verify that there are not too many planes attached to crtc
-	 * and that we don't have conflicting mixer stages:
+	 * and that we don't have conflicting mixer stages: the stages run
+	 * from the base one to nb_stages, the cursor taking the top one.
+	 * Userspace tests the commits it may not get, do not shout then.
 	 */
-	if ((cnt + start - 1) >= hw_cfg->lm.nb_stages) {
-		DRM_DEV_ERROR(dev->dev, "too many planes! cnt=%d, start stage=%d\n",
-			cnt, start);
+	if ((cnt + start - 1) > hw_cfg->lm.nb_stages) {
+		DRM_DEBUG_ATOMIC("too many planes! cnt=%d, start stage=%d\n",
+				 cnt, start);
 		return -EINVAL;
 	}
 
