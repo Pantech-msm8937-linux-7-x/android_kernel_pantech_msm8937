@@ -962,6 +962,16 @@ static int lp5523_detect(struct i2c_client *client)
 		return -ENODEV;
 }
 
+static u8 lp5523_clock_cfg(struct i2c_client *client)
+{
+	struct lp5523_chip *chip = i2c_get_clientdata(client);
+
+	if (chip && chip->pdata && chip->pdata->clock_mode == LP5523_CLOCK_INT)
+		return LP5523_INT_CLK;
+
+	return LP5523_AUTO_CLK;
+}
+
 static int lp5523_configure(struct i2c_client *client)
 {
 	struct lp5523_chip *chip = i2c_get_clientdata(client);
@@ -978,9 +988,14 @@ static int lp5523_configure(struct i2c_client *client)
 	/* Chip startup time is 500 us, 1 - 2 ms gives some margin */
 	usleep_range(1000, 2000);
 
+	/*
+	 * The clock the device tree asks for: the internal one on the EF71.
+	 * Left to pick it automatically, the chip ran its engines from the
+	 * clock on its CLK pin, and every LED froze once that stopped.
+	 */
 	ret |= lp5523_write(client, LP5523_REG_CONFIG,
 			LP5523_AUTO_INC | LP5523_PWR_SAVE |
-			LP5523_CP_AUTO | LP5523_AUTO_CLK |
+			LP5523_CP_AUTO | lp5523_clock_cfg(client) |
 			LP5523_PWM_PWR_SAVE);
 
 	/* turn on all leds */
