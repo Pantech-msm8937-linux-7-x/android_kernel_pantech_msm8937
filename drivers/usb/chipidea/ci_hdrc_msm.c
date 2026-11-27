@@ -305,6 +305,41 @@ static void ci_hdrc_msm_remove(struct platform_device *pdev)
 	clk_disable_unprepare(ci->core_clk);
 }
 
+/*
+ * The clocks stay on for as long as the controller is bound, and they hold
+ * XO on through their parents: let them go while the system sleeps, once
+ * the controller itself is suspended.
+ */
+static int ci_hdrc_msm_suspend(struct device *dev)
+{
+	struct ci_hdrc_msm *ci = dev_get_drvdata(dev);
+
+	clk_disable_unprepare(ci->iface_clk);
+	clk_disable_unprepare(ci->core_clk);
+
+	return 0;
+}
+
+static int ci_hdrc_msm_resume(struct device *dev)
+{
+	struct ci_hdrc_msm *ci = dev_get_drvdata(dev);
+	int ret;
+
+	ret = clk_prepare_enable(ci->core_clk);
+	if (ret)
+		return ret;
+
+	ret = clk_prepare_enable(ci->iface_clk);
+	if (ret)
+		clk_disable_unprepare(ci->core_clk);
+
+	return ret;
+}
+
+static const struct dev_pm_ops ci_hdrc_msm_pm_ops = {
+	LATE_SYSTEM_SLEEP_PM_OPS(ci_hdrc_msm_suspend, ci_hdrc_msm_resume)
+};
+
 static const struct of_device_id msm_ci_dt_match[] = {
 	{ .compatible = "qcom,ci-hdrc", },
 	{ }
@@ -317,6 +352,7 @@ static struct platform_driver ci_hdrc_msm_driver = {
 	.driver = {
 		.name = "msm_hsusb",
 		.of_match_table = msm_ci_dt_match,
+		.pm = pm_sleep_ptr(&ci_hdrc_msm_pm_ops),
 	},
 };
 
