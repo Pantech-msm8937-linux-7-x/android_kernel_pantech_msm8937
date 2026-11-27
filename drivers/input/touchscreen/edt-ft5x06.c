@@ -1284,8 +1284,14 @@ static int edt_ft5x06_ts_probe(struct i2c_client *client)
 	if (error)
 		return error;
 
-	tsdata->reset_gpio = devm_gpiod_get_optional(&client->dev,
-						     "reset", GPIOD_OUT_HIGH);
+	/*
+	 * A touch and display driver following its panel (the FT8716) shares
+	 * its reset with the display the bootloader left running: take it
+	 * released, without a reset pulse, as FocalTech's driver does.
+	 */
+	tsdata->reset_gpio = devm_gpiod_get_optional(&client->dev, "reset",
+				drm_is_panel_follower(&client->dev) ?
+				GPIOD_OUT_LOW : GPIOD_OUT_HIGH);
 	if (IS_ERR(tsdata->reset_gpio)) {
 		error = PTR_ERR(tsdata->reset_gpio);
 		dev_err(&client->dev,
@@ -1321,7 +1327,7 @@ static int edt_ft5x06_ts_probe(struct i2c_client *client)
 		usleep_range(5000, 6000);
 	}
 
-	if (tsdata->reset_gpio) {
+	if (tsdata->reset_gpio && !drm_is_panel_follower(&client->dev)) {
 		usleep_range(5000, 6000);
 		gpiod_set_value_cansleep(tsdata->reset_gpio, 0);
 		msleep(300);
@@ -1633,8 +1639,21 @@ static int edt_ft5x06_panel_unpreparing(struct drm_panel_follower *follower)
 	if (tsdata->dt2w_enabled && edt_ft5x06_dt2w_enter(tsdata))
 		dev_err(dev, "failed to enter gesture mode, sleeping instead\n");
 
-	if (!tsdata->dt2w_active)
+	if (tsdata->dt2w_active) {
+		/* waiting for a double tap */
+	} else if (tsdata->wake_gesture) {
+		/*
+		 * The touch and display driver shares its reset with the
+		 * display: only sleep, as FocalTech's driver does, so that
+		 * the bootloader still finds the display out of reset after a
+		 * reboot.
+		 */
+		disable_irq(tsdata->client->irq);
+		regmap_write(tsdata->regmap, PMOD_REGISTER_OPMODE,
+			     PMOD_REGISTER_HIBERNATE);
+	} else {
 		edt_ft5x06_ts_power_off(tsdata);
+	}
 
 	follower->panel->keep_awake = tsdata->dt2w_active;
 	tsdata->screen_off = true;
@@ -1652,11 +1671,18 @@ static int edt_ft5x06_panel_prepared(struct drm_panel_follower *follower)
 	if (!tsdata->screen_off)
 		return 0;
 
-	if (tsdata->dt2w_active) {
-		tsdata->dt2w_active = false;
-		disable_irq_wake(tsdata->client->irq);
+	if (tsdata->dt2w_active || tsdata->wake_gesture) {
+		bool slept = !tsdata->dt2w_active;
 
-		/* Out of gesture mode by a reset, as FocalTech's driver does */
+		if (tsdata->dt2w_active) {
+			tsdata->dt2w_active = false;
+			disable_irq_wake(tsdata->client->irq);
+		}
+
+		/*
+		 * Out of gesture mode or sleep by a reset, as FocalTech's
+		 * driver does
+		 */
 		if (tsdata->reset_gpio) {
 			gpiod_set_value_cansleep(tsdata->reset_gpio, 1);
 			msleep(20);
@@ -1666,6 +1692,9 @@ static int edt_ft5x06_panel_prepared(struct drm_panel_follower *follower)
 		} else {
 			regmap_write(tsdata->regmap, EDT_GESTURE_EN, 0x00);
 		}
+
+		if (slept)
+			enable_irq(tsdata->client->irq);
 	} else {
 		edt_ft5x06_ts_power_on(tsdata);
 	}
