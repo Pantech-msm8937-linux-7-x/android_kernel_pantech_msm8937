@@ -289,6 +289,8 @@ struct smbchg_chip {
 struct smbchg_irq {
 	const char *name;
 	irq_handler_t handler;
+	/* wakes the system, as on the vendor driver */
+	bool wake;
 };
 
 struct smbchg_data {

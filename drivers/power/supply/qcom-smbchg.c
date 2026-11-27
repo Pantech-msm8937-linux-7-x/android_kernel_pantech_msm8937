@@ -19,6 +19,7 @@
 #include <linux/cleanup.h>
 #include <linux/mutex.h>
 #include <linux/platform_device.h>
+#include <linux/pm_wakeup.h>
 #include <linux/power_supply.h>
 #include <linux/regmap.h>
 #include <linux/slab.h>
@@ -1150,10 +1151,15 @@ static irqreturn_t smbchg_handle_batt_presence(int irq, void *data)
 	return IRQ_HANDLED;
 }
 
+/*
+ * Source detection, and the input going under or over voltage, which a
+ * removal of the cable shows as: woken up by it, stay up for the detection.
+ */
 static irqreturn_t smbchg_handle_usb_source_detect(int irq, void *data)
 {
 	struct smbchg_chip *chip = data;
 
+	pm_wakeup_event(chip->dev, 500);
 	schedule_delayed_work(&chip->detect_work, msecs_to_jiffies(20));
 	power_supply_changed(chip->usb_psy);
 
@@ -1317,30 +1323,30 @@ static irqreturn_t smbchg_handle_temp_shutdown(int irq, void *data)
 }
 
 const struct smbchg_irq smbchg_irqs[] = {
-	{ "chg-error", smbchg_handle_charger_error },
+	{ "chg-error", smbchg_handle_charger_error, true },
 	{ "chg-inhibit", NULL },
 	{ "chg-prechg-sft", NULL },
 	{ "chg-complete-chg-sft", NULL },
 	{ "chg-p2f-thr", smbchg_handle_p2f },
 	{ "chg-rechg-thr", smbchg_handle_rechg },
-	{ "chg-taper-thr", smbchg_handle_taper },
+	{ "chg-taper-thr", smbchg_handle_taper, true },
 	{ "chg-tcc-thr", smbchg_handle_tcc },
-	{ "batt-hot", smbchg_handle_batt_temp },
-	{ "batt-warm", smbchg_handle_batt_temp },
-	{ "batt-cold", smbchg_handle_batt_temp },
-	{ "batt-cool", smbchg_handle_batt_temp },
+	{ "batt-hot", smbchg_handle_batt_temp, true },
+	{ "batt-warm", smbchg_handle_batt_temp, true },
+	{ "batt-cold", smbchg_handle_batt_temp, true },
+	{ "batt-cool", smbchg_handle_batt_temp, true },
 	{ "batt-ov", NULL },
 	{ "batt-low", NULL },
-	{ "batt-missing", smbchg_handle_batt_presence },
+	{ "batt-missing", smbchg_handle_batt_presence, true },
 	{ "batt-term-missing", NULL },
-	{ "usbin-uv", NULL },
-	{ "usbin-ov", NULL },
-	{ "usbin-src-det", smbchg_handle_usb_source_detect },
-	{ "usbid-change", smbchg_handle_usbid_change },
-	{ "otg-fail", smbchg_handle_otg_fail },
-	{ "otg-oc", smbchg_handle_otg_oc },
-	{ "aicl-done", smbchg_handle_aicl_done },
-	{ "dcin-uv", smbchg_handle_dcin },
+	{ "usbin-uv", smbchg_handle_usb_source_detect, true },
+	{ "usbin-ov", smbchg_handle_usb_source_detect, true },
+	{ "usbin-src-det", smbchg_handle_usb_source_detect, true },
+	{ "usbid-change", smbchg_handle_usbid_change, true },
+	{ "otg-fail", smbchg_handle_otg_fail, true },
+	{ "otg-oc", smbchg_handle_otg_oc, true },
+	{ "aicl-done", smbchg_handle_aicl_done, true },
+	{ "dcin-uv", smbchg_handle_dcin, true },
 	{ "dcin-ov", smbchg_handle_dcin },
 	{ "power-ok", NULL },
 	{ "temp-shutdown", smbchg_handle_temp_shutdown },
@@ -2022,7 +2028,13 @@ static int smbchg_probe(struct platform_device *pdev)
 				smbchg_irqs[i].name, ERR_PTR(irq));
 			return ret;
 		}
+
+		/* plugging a cable or a charger fault wakes the system */
+		if (smbchg_irqs[i].wake)
+			enable_irq_wake(irq);
 	}
+
+	device_init_wakeup(chip->dev, true);
 
 	platform_set_drvdata(pdev, chip);
 
