@@ -158,6 +158,8 @@ static int ef71_nt35695_prepare(struct drm_panel *panel)
 	struct device *dev = &ctx->dsi->dev;
 	int ret;
 
+	/* still as the bootloader left it on the first prepare */
+	gpiod_direction_output(ctx->reset_gpio, 0);
 	ctx->desc->reset(ctx);
 
 	ret = ctx->desc->on(ctx);
@@ -406,7 +408,12 @@ static int ef71_nt35695_probe(struct mipi_dsi_device *dsi)
 	if (IS_ERR(ctx))
 		return PTR_ERR(ctx);
 
-	ctx->reset_gpio = devm_gpiod_get(dev, "reset", GPIOD_OUT_HIGH);
+	/*
+	 * As the bootloader left it: the panel holds the bootloader logo
+	 * (in its own frame memory, in command mode) until the first prepare
+	 * resets it.
+	 */
+	ctx->reset_gpio = devm_gpiod_get(dev, "reset", GPIOD_ASIS);
 	if (IS_ERR(ctx->reset_gpio))
 		return dev_err_probe(dev, PTR_ERR(ctx->reset_gpio),
 				     "Failed to get reset-gpios\n");
