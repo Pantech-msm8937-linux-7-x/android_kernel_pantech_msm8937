@@ -15,7 +15,9 @@
 #include <linux/netdevice.h>
 #include <linux/platform_device.h>
 #include <linux/pm_runtime.h>
+#include <linux/pm_wakeup.h>
 #include <linux/soc/qcom/smem_state.h>
+#include <linux/suspend.h>
 #include <linux/spinlock.h>
 #include <linux/wait.h>
 #include <linux/workqueue.h>
@@ -864,7 +866,13 @@ static irqreturn_t bam_dmux_pc_irq(int irq, void *data)
 
 	dev_dbg(dmux->dev, "pc: %u\n", new_state);
 
+	/*
+	 * The remote side gives up (and restarts) if the BAM stays down for
+	 * long while it wants it up: stay awake for as long as it is up.
+	 */
 	if (new_state) {
+		pm_stay_awake(dmux->dev);
+		pm_system_wakeup();
 		if (bam_dmux_power_on(dmux))
 			bam_dmux_pc_ack(dmux);
 		else
@@ -872,6 +880,7 @@ static irqreturn_t bam_dmux_pc_irq(int irq, void *data)
 	} else {
 		bam_dmux_power_off(dmux);
 		bam_dmux_pc_ack(dmux);
+		pm_relax(dmux->dev);
 	}
 
 	dmux->pc_state = new_state;
@@ -1004,13 +1013,16 @@ static int bam_dmux_probe(struct platform_device *pdev)
 	pm_runtime_use_autosuspend(dev);
 	pm_runtime_enable(dev);
 
+	device_init_wakeup(dev, true);
+
+	/* The remote side expects these handled while we are suspended too */
 	ret = devm_request_threaded_irq(dev, pc_ack_irq, NULL, bam_dmux_pc_ack_irq,
-					IRQF_ONESHOT, NULL, dmux);
+					IRQF_ONESHOT | IRQF_NO_SUSPEND, NULL, dmux);
 	if (ret)
 		goto err_disable_pm;
 
 	ret = devm_request_threaded_irq(dev, dmux->pc_irq, NULL, bam_dmux_pc_irq,
-					IRQF_ONESHOT, NULL, dmux);
+					IRQF_ONESHOT | IRQF_NO_SUSPEND, NULL, dmux);
 	if (ret)
 		goto err_disable_pm;
 
@@ -1021,6 +1033,7 @@ static int bam_dmux_probe(struct platform_device *pdev)
 
 	/* Check if remote finished initialization before us */
 	if (dmux->pc_state) {
+		pm_stay_awake(dev);
 		if (bam_dmux_power_on(dmux))
 			bam_dmux_pc_ack(dmux);
 		else
@@ -1030,6 +1043,7 @@ static int bam_dmux_probe(struct platform_device *pdev)
 	return 0;
 
 err_disable_pm:
+	device_init_wakeup(dev, false);
 	pm_runtime_disable(dev);
 	pm_runtime_dont_use_autosuspend(dev);
 	return ret;
@@ -1066,6 +1080,7 @@ static void bam_dmux_remove(struct platform_device *pdev)
 	disable_irq(dmux->pc_irq);
 	bam_dmux_power_off(dmux);
 	bam_dmux_free_skbs(dmux->tx_skbs, DMA_TO_DEVICE);
+	device_init_wakeup(dev, false);
 }
 
 static const struct dev_pm_ops bam_dmux_pm_ops = {
