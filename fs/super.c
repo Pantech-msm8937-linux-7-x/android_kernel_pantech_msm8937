@@ -1125,9 +1125,24 @@ cancel_readonly:
 	return retval;
 }
 
-static void do_emergency_remount_callback(struct super_block *sb, void *unused)
+struct emergency_remount_fc {
+	struct list_head list;
+	struct fs_context *fc;
+};
+
+/*
+ * The context holds an active reference to the superblock. An unmount
+ * running at the same time (as Android's shutdown does, remounting read-only
+ * as soon as unmounting takes long) may leave it the last one, and dropping
+ * it then takes s_umount, which the iteration holds here: put the contexts
+ * once the iteration is done.
+ */
+static void do_emergency_remount_callback(struct super_block *sb, void *arg)
 {
+	struct list_head *done = arg;
+
 	if (sb->s_bdev && !sb_rdonly(sb)) {
+		struct emergency_remount_fc *entry;
 		struct fs_context *fc;
 
 		fc = fs_context_for_reconfigure(sb->s_root,
@@ -1135,15 +1150,25 @@ static void do_emergency_remount_callback(struct super_block *sb, void *unused)
 		if (!IS_ERR(fc)) {
 			if (parse_monolithic_mount_data(fc, NULL) == 0)
 				(void)reconfigure_super(fc);
-			put_fs_context(fc);
+
+			entry = kmalloc(sizeof(*entry), GFP_NOFS | __GFP_NOFAIL);
+			entry->fc = fc;
+			list_add_tail(&entry->list, done);
 		}
 	}
 }
 
 static void do_emergency_remount(struct work_struct *work)
 {
-	__iterate_supers(do_emergency_remount_callback, NULL,
+	struct emergency_remount_fc *entry, *next;
+	LIST_HEAD(done);
+
+	__iterate_supers(do_emergency_remount_callback, &done,
 			 SUPER_ITER_EXCL | SUPER_ITER_REVERSE);
+	list_for_each_entry_safe(entry, next, &done, list) {
+		put_fs_context(entry->fc);
+		kfree(entry);
+	}
 	kfree(work);
 	printk("Emergency Remount complete\n");
 }
