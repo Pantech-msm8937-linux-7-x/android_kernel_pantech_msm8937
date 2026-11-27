@@ -205,6 +205,18 @@
 				exit-latency-us = <1000>;
 				min-residency-us = <6500>;
 			};
+
+			/*
+			 * Both clusters down: the only state that has the RPM
+			 * told, so that it can shut XO down and lower the rails
+			 */
+			system_sleep_0: system-power-collapse {
+				compatible = "domain-idle-state";
+				arm,psci-suspend-param = <0x42000353>;
+				entry-latency-us = <644>;
+				exit-latency-us = <10782>;
+				min-residency-us = <7500>;
+			};
 		};
 
 		idle-states {
@@ -417,6 +429,7 @@
 
 		cluster_pd: power-domain-cluster {
 			#power-domain-cells = <0>;
+			power-domains = <&system_pd>;
 			domain-idle-states = <&cluster_sleep_0>;
 		};
 
@@ -446,7 +459,13 @@
 
 		cluster1_pd: power-domain-cluster1 {
 			#power-domain-cells = <0>;
+			power-domains = <&system_pd>;
 			domain-idle-states = <&cluster_sleep_0>;
+		};
+
+		system_pd: power-domain-system {
+			#power-domain-cells = <0>;
+			domain-idle-states = <&system_sleep_0>;
 		};
 
 		cpu_pd4: power-domain-cpu4 {
