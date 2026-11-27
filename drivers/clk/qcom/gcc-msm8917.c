@@ -39,6 +39,7 @@ enum {
 	DT_DSI0PLL_BYTE,
 	DT_DSI1PLL,
 	DT_DSI1PLL_BYTE,
+	DT_XO_A,
 };
 
 enum {
@@ -72,6 +73,69 @@ static struct clk_alpha_pll gpll0_sleep_clk_src = {
 	},
 };
 
+/*
+ * GPLL0 has one vote for the APSS, which two clocks share: gpll0_early for
+ * the peripherals, on the XO the RPM keeps while the APSS sleeps, and
+ * gpll0_ao for the CPU and CCI muxes, on the XO it keeps only while the
+ * APSS is active, as downstream has them. The latter is always on: were the
+ * muxes on gpll0_early, XO could never be shut down. Drop the vote only
+ * once neither wants the PLL.
+ */
+static struct clk_alpha_pll gpll0_early;
+static struct clk_alpha_pll gpll0_ao;
+static unsigned int gpll0_votes;
+
+static unsigned int gpll0_vote_bit(struct clk_hw *hw)
+{
+	return hw == &gpll0_ao.clkr.hw ? BIT(1) : BIT(0);
+}
+
+/* Called under the enable lock of the clock framework */
+static int gpll0_vote_enable(struct clk_hw *hw)
+{
+	unsigned int votes = gpll0_votes;
+	int ret;
+
+	gpll0_votes |= gpll0_vote_bit(hw);
+	if (votes)
+		return 0;
+
+	ret = clk_alpha_pll_fixed_ops.enable(hw);
+	if (ret)
+		gpll0_votes = votes;
+
+	return ret;
+}
+
+static void gpll0_vote_disable(struct clk_hw *hw)
+{
+	gpll0_votes &= ~gpll0_vote_bit(hw);
+	if (!gpll0_votes)
+		clk_alpha_pll_fixed_ops.disable(hw);
+}
+
+static int gpll0_vote_is_enabled(struct clk_hw *hw)
+{
+	/* The other one's vote is not this one's */
+	if (!(gpll0_votes & gpll0_vote_bit(hw)) && gpll0_votes)
+		return 0;
+
+	return clk_alpha_pll_fixed_ops.is_enabled(hw);
+}
+
+static unsigned long gpll0_vote_recalc_rate(struct clk_hw *hw,
+					    unsigned long parent_rate)
+{
+	return clk_alpha_pll_fixed_ops.recalc_rate(hw, parent_rate);
+}
+
+static const struct clk_ops gpll0_vote_ops = {
+	.enable = gpll0_vote_enable,
+	.disable = gpll0_vote_disable,
+	.is_enabled = gpll0_vote_is_enabled,
+	.recalc_rate = gpll0_vote_recalc_rate,
+};
+
 static struct clk_alpha_pll gpll0_early = {
 	.offset = 0x21000,
 	.regs = clk_alpha_pll_regs[CLK_ALPHA_PLL_TYPE_DEFAULT],
@@ -84,7 +148,24 @@ static struct clk_alpha_pll gpll0_early = {
 				&gpll0_sleep_clk_src.clkr.hw,
 			},
 			.num_parents = 1,
-			.ops = &clk_alpha_pll_fixed_ops,
+			.ops = &gpll0_vote_ops,
+		},
+	},
+};
+
+static struct clk_alpha_pll gpll0_ao = {
+	.offset = 0x21000,
+	.regs = clk_alpha_pll_regs[CLK_ALPHA_PLL_TYPE_DEFAULT],
+	.clkr = {
+		.enable_reg = 0x45000,
+		.enable_mask = BIT(0),
+		.hw.init = &(struct clk_init_data) {
+			.name = "gpll0_ao",
+			.parent_data = &(const struct clk_parent_data) {
+				.index = DT_XO_A,
+			},
+			.num_parents = 1,
+			.ops = &gpll0_vote_ops,
 		},
 	},
 };
@@ -3508,6 +3589,7 @@ static struct gdsc cpp_gdsc = {
 static struct clk_regmap *gcc_msm8917_clocks[] = {
 	[GPLL0] = &gpll0.clkr,
 	[GPLL0_EARLY] = &gpll0_early.clkr,
+	[GPLL0_AO] = &gpll0_ao.clkr,
 	[GPLL0_SLEEP_CLK_SRC] = &gpll0_sleep_clk_src.clkr,
 	[GPLL3] = &gpll3.clkr,
 	[GPLL3_EARLY] = &gpll3_early.clkr,
@@ -3677,6 +3759,7 @@ static struct clk_regmap *gcc_msm8917_clocks[] = {
 static struct clk_regmap *gcc_msm8937_clocks[] = {
 	[GPLL0] = &gpll0.clkr,
 	[GPLL0_EARLY] = &gpll0_early.clkr,
+	[GPLL0_AO] = &gpll0_ao.clkr,
 	[GPLL0_SLEEP_CLK_SRC] = &gpll0_sleep_clk_src.clkr,
 	[GPLL3] = &gpll3.clkr,
 	[GPLL3_EARLY] = &gpll3_early.clkr,
@@ -3860,6 +3943,7 @@ static struct clk_regmap *gcc_msm8937_clocks[] = {
 static struct clk_regmap *gcc_msm8940_clocks[] = {
 	[GPLL0] = &gpll0.clkr,
 	[GPLL0_EARLY] = &gpll0_early.clkr,
+	[GPLL0_AO] = &gpll0_ao.clkr,
 	[GPLL0_SLEEP_CLK_SRC] = &gpll0_sleep_clk_src.clkr,
 	[GPLL3] = &gpll3.clkr,
 	[GPLL3_EARLY] = &gpll3_early.clkr,

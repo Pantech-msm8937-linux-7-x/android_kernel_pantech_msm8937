@@ -189,6 +189,7 @@
 #define MSM8937_GCC_OXILI_TIMER_CLK			181
 #define MSM8937_GCC_CAMSS_CPP_AXI_CLK			182
 #define MSM8940_GCC_IPA_TBU_CLK				182
+#define GPLL0_AO				183
 
 /* GCC block resets */
 #define GCC_CAMSS_MICRO_BCR			0
