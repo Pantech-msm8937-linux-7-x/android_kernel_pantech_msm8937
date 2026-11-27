@@ -38,65 +38,7 @@
 		#address-cells = <1>;
 		#size-cells = <0>;
 
-		cpu0: cpu@0 {
-			compatible = "arm,cortex-a53";
-			reg = <0x0>;
-			device_type = "cpu";
-			enable-method = "psci";
-			clocks = <&apcs0>;
-			operating-points-v2 = <&cpu_opp_table_c0>;
-			next-level-cache = <&l2_0>;
-			#cooling-cells = <2>;
-			power-domains = <&cpu_pd4>;
-			power-domain-names = "psci";
-
-			l2_0: l2-cache {
-				compatible = "cache";
-				cache-level = <2>;
-				cache-size = <0x80000>;
-				cache-unified;
-			};
-		};
-
-		cpu1: cpu@1 {
-			compatible = "arm,cortex-a53";
-			reg = <0x1>;
-			device_type = "cpu";
-			enable-method = "psci";
-			clocks = <&apcs0>;
-			operating-points-v2 = <&cpu_opp_table_c0>;
-			next-level-cache = <&l2_0>;
-			#cooling-cells = <2>;
-			power-domains = <&cpu_pd5>;
-			power-domain-names = "psci";
-		};
-
-		cpu2: cpu@2 {
-			compatible = "arm,cortex-a53";
-			reg = <0x2>;
-			device_type = "cpu";
-			enable-method = "psci";
-			clocks = <&apcs0>;
-			operating-points-v2 = <&cpu_opp_table_c0>;
-			next-level-cache = <&l2_0>;
-			#cooling-cells = <2>;
-			power-domains = <&cpu_pd6>;
-			power-domain-names = "psci";
-		};
-
-		cpu3: cpu@3 {
-			compatible = "arm,cortex-a53";
-			reg = <0x3>;
-			device_type = "cpu";
-			enable-method = "psci";
-			clocks = <&apcs0>;
-			operating-points-v2 = <&cpu_opp_table_c0>;
-			next-level-cache = <&l2_0>;
-			#cooling-cells = <2>;
-			power-domains = <&cpu_pd7>;
-			power-domain-names = "psci";
-		};
-
+		/* The boot CPU comes first, have its cluster follow it */
 		cpu4: cpu@100 {
 			compatible = "arm,cortex-a53";
 			reg = <0x100>;
@@ -156,28 +98,68 @@
 			power-domain-names = "psci";
 		};
 
-		cpu-map {
-			/* Little Cores */
-			cluster0 {
-				core0 {
-					cpu = <&cpu0>;
-				};
+		cpu0: cpu@0 {
+			compatible = "arm,cortex-a53";
+			reg = <0x0>;
+			device_type = "cpu";
+			enable-method = "psci";
+			clocks = <&apcs0>;
+			operating-points-v2 = <&cpu_opp_table_c0>;
+			next-level-cache = <&l2_0>;
+			#cooling-cells = <2>;
+			power-domains = <&cpu_pd4>;
+			power-domain-names = "psci";
 
-				core1 {
-					cpu = <&cpu1>;
-				};
-
-				core2 {
-					cpu = <&cpu2>;
-				};
-
-				core3 {
-					cpu = <&cpu3>;
-				};
+			l2_0: l2-cache {
+				compatible = "cache";
+				cache-level = <2>;
+				cache-size = <0x80000>;
+				cache-unified;
 			};
+		};
 
+		cpu1: cpu@1 {
+			compatible = "arm,cortex-a53";
+			reg = <0x1>;
+			device_type = "cpu";
+			enable-method = "psci";
+			clocks = <&apcs0>;
+			operating-points-v2 = <&cpu_opp_table_c0>;
+			next-level-cache = <&l2_0>;
+			#cooling-cells = <2>;
+			power-domains = <&cpu_pd5>;
+			power-domain-names = "psci";
+		};
+
+		cpu2: cpu@2 {
+			compatible = "arm,cortex-a53";
+			reg = <0x2>;
+			device_type = "cpu";
+			enable-method = "psci";
+			clocks = <&apcs0>;
+			operating-points-v2 = <&cpu_opp_table_c0>;
+			next-level-cache = <&l2_0>;
+			#cooling-cells = <2>;
+			power-domains = <&cpu_pd6>;
+			power-domain-names = "psci";
+		};
+
+		cpu3: cpu@3 {
+			compatible = "arm,cortex-a53";
+			reg = <0x3>;
+			device_type = "cpu";
+			enable-method = "psci";
+			clocks = <&apcs0>;
+			operating-points-v2 = <&cpu_opp_table_c0>;
+			next-level-cache = <&l2_0>;
+			#cooling-cells = <2>;
+			power-domains = <&cpu_pd7>;
+			power-domain-names = "psci";
+		};
+
+		cpu-map {
 			/* Big Cores */
-			cluster1 {
+			cluster0 {
 				core0 {
 					cpu = <&cpu4>;
 				};
@@ -192,6 +174,25 @@
 
 				core3 {
 					cpu = <&cpu7>;
+				};
+			};
+
+			/* Little Cores */
+			cluster1 {
+				core0 {
+					cpu = <&cpu0>;
+				};
+
+				core1 {
+					cpu = <&cpu1>;
+				};
+
+				core2 {
+					cpu = <&cpu2>;
+				};
+
+				core3 {
+					cpu = <&cpu3>;
 				};
 			};
 		};
