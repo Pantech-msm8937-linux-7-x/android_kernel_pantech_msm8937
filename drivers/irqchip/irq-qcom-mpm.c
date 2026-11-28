@@ -9,6 +9,7 @@
 #include <linux/init.h>
 #include <linux/interrupt.h>
 #include <linux/io.h>
+#include <linux/io-64-nonatomic-lo-hi.h>
 #include <linux/irqchip.h>
 #include <linux/irqdomain.h>
 #include <linux/mailbox_client.h>
@@ -85,6 +86,9 @@ struct qcom_mpm_priv {
 	struct regmap *ipc_regmap;
 	u32 ipc_offset;
 	u32 ipc_bit;
+	void __iomem *timer_frame;
+	int irq;
+	int rpm_irq;
 	struct mpm_gic_map *maps;
 	unsigned int map_cnt;
 	unsigned int reg_stride;
@@ -297,25 +301,87 @@ static irqreturn_t qcom_mpm_handler(int irq, void *dev_id)
 	return ret;
 }
 
+#define CNTP_CVAL	0x20
+#define CNTP_CTL	0x2c
+#define CNTV_CVAL	0x30
+#define CNTV_CTL	0x3c
+#define CNT_CTL_ENABLE	BIT(0)
+#define CNT_CTL_IMASK	BIT(1)
+
+/*
+ * With XO shut down, the timers do not wake the system up any more: the RPM
+ * does, at the time given in the first two words of the vMPM. Give it the
+ * expiry of the memory-mapped timer the idle CPUs leave their events with,
+ * as downstream does, or none.
+ */
+static void qcom_mpm_write_wakeup(struct qcom_mpm_priv *priv)
+{
+	u64 wakeup = U64_MAX;
+	u32 ctl;
+
+	ctl = readl_relaxed(priv->timer_frame + CNTV_CTL);
+	if ((ctl & (CNT_CTL_ENABLE | CNT_CTL_IMASK)) == CNT_CTL_ENABLE) {
+		wakeup = lo_hi_readq_relaxed(priv->timer_frame + CNTV_CVAL);
+	} else {
+		ctl = readl_relaxed(priv->timer_frame + CNTP_CTL);
+		if ((ctl & (CNT_CTL_ENABLE | CNT_CTL_IMASK)) == CNT_CTL_ENABLE)
+			wakeup = lo_hi_readq_relaxed(priv->timer_frame + CNTP_CVAL);
+	}
+
+	writel_relaxed(lower_32_bits(wakeup), priv->base);
+	writel_relaxed(upper_32_bits(wakeup), priv->base + 4);
+}
+
 static int mpm_pd_power_off(struct generic_pm_domain *genpd)
 {
 	struct qcom_mpm_priv *priv = container_of(genpd, struct qcom_mpm_priv,
 						  genpd);
+	const struct cpumask *cpumask;
 	int i, ret;
 
 	for (i = 0; i < priv->reg_stride; i++)
 		qcom_mpm_write(priv, MPM_REG_STATUS, i, 0);
 
+	if (priv->timer_frame)
+		qcom_mpm_write_wakeup(priv);
+
+	/*
+	 * As downstream does: the RPM interrupt must not wake the system up
+	 * while it sleeps, and the CPU going down last is the one to take
+	 * the wakeup and the RPM interrupts once it comes back.
+	 */
+	cpumask = cpumask_of(smp_processor_id());
+	if (priv->rpm_irq > 0) {
+		disable_irq_nosync(priv->rpm_irq);
+		irq_set_affinity(priv->rpm_irq, cpumask);
+	}
+	irq_set_affinity(priv->irq, cpumask);
+
 	/* Notify RPM to write vMPM into HW */
-	if (priv->ipc_regmap)
-		return regmap_write(priv->ipc_regmap, priv->ipc_offset,
-				    BIT(priv->ipc_bit));
+	if (priv->ipc_regmap) {
+		ret = regmap_write(priv->ipc_regmap, priv->ipc_offset,
+				   BIT(priv->ipc_bit));
+	} else {
+		ret = mbox_send_message(priv->mbox_chan, NULL);
+		if (ret >= 0) {
+			mbox_client_txdone(priv->mbox_chan, 0);
+			ret = 0;
+		}
+	}
 
-	ret = mbox_send_message(priv->mbox_chan, NULL);
-	if (ret < 0)
-		return ret;
+	if (ret && priv->rpm_irq > 0)
+		enable_irq(priv->rpm_irq);
 
-	mbox_client_txdone(priv->mbox_chan, 0);
+	return ret;
+}
+
+static int mpm_pd_power_on(struct generic_pm_domain *genpd)
+{
+	struct qcom_mpm_priv *priv = container_of(genpd, struct qcom_mpm_priv,
+						  genpd);
+
+	if (priv->rpm_irq > 0)
+		enable_irq(priv->rpm_irq);
 
 	return 0;
 }
@@ -365,7 +431,7 @@ static int qcom_mpm_probe(struct platform_device *pdev, struct device_node *pare
 	struct device *dev = &pdev->dev;
 	struct irq_domain *parent_domain;
 	struct generic_pm_domain *genpd;
-	struct device_node *msgram_np;
+	struct device_node *msgram_np, *np_timer;
 	struct qcom_mpm_priv *priv;
 	unsigned int pin_cnt;
 	struct resource res;
@@ -448,9 +514,23 @@ static int qcom_mpm_probe(struct platform_device *pdev, struct device_node *pare
 		qcom_mpm_write(priv, MPM_REG_STATUS, i, 0);
 	}
 
+	/* The timer frame the next wakeup is read from, if the RPM needs it */
+	np_timer = of_parse_phandle(np, "qcom,mmio-timer-frame", 0);
+	if (np_timer) {
+		/* Shared with the timer driver: map it, do not claim it */
+		priv->timer_frame = of_iomap(np_timer, 0);
+		of_node_put(np_timer);
+		if (!priv->timer_frame)
+			return -ENOMEM;
+	}
+
 	irq = platform_get_irq(pdev, 0);
 	if (irq < 0)
 		return irq;
+	priv->irq = irq;
+
+	/* The RPM interrupt, held off while the system sleeps, if given */
+	priv->rpm_irq = platform_get_irq_byname_optional(pdev, "rpm");
 
 	/*
 	 * The IPC register may be given as a syscon, as for the SMD edges:
@@ -488,6 +568,7 @@ static int qcom_mpm_probe(struct platform_device *pdev, struct device_node *pare
 	genpd = &priv->genpd;
 	genpd->flags = GENPD_FLAG_IRQ_SAFE;
 	genpd->power_off = mpm_pd_power_off;
+	genpd->power_on = mpm_pd_power_on;
 
 	genpd->name = devm_kasprintf(dev, GFP_KERNEL, "%s", dev_name(dev));
 	if (!genpd->name)

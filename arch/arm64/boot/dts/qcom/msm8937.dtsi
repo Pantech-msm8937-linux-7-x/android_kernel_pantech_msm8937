@@ -570,8 +570,11 @@
 		mpm: interrupt-controller {
 			compatible = "qcom,mpm";
 			qcom,rpm-msg-ram = <&apss_mpm>;
-			interrupts = <GIC_SPI 171 IRQ_TYPE_EDGE_RISING>;
+			interrupts = <GIC_SPI 171 IRQ_TYPE_EDGE_RISING>,
+				     <GIC_SPI 168 IRQ_TYPE_EDGE_RISING>;
+			interrupt-names = "wakeup", "rpm";
 			qcom,ipc = <&apcs1 8 1>;
+			qcom,mmio-timer-frame = <&timer_frame0>;
 			interrupt-controller;
 			#interrupt-cells = <2>;
 			#power-domain-cells = <0>;
@@ -2474,7 +2477,7 @@
 			#address-cells = <1>;
 			#size-cells = <1>;
 
-			frame@b121000 {
+			timer_frame0: frame@b121000 {
 				reg = <0x0b121000 0x1000>,
 				      <0x0b122000 0x1000>;
 				frame-number = <0>;
