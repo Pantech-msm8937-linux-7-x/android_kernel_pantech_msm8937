@@ -781,6 +781,47 @@ fail:
 	return ret;
 }
 
+/*
+ * The vote holds the buses, and DDR, up through system sleep as well, where
+ * the RPM then never lowers the rails to their minimum. It is also the only
+ * vote that keeps them up for the CPUs and the modem while the system runs
+ * (the CPUs starve and the modem watchdog bites without it): let it go for
+ * system sleep only. There is one MDP.
+ */
+static struct icc_path *mdp5_icc_paths[3];
+
+static void mdp5_icc_set(bool enable)
+{
+	int i;
+
+	for (i = 0; i < ARRAY_SIZE(mdp5_icc_paths); i++) {
+		if (IS_ERR_OR_NULL(mdp5_icc_paths[i]))
+			continue;
+		if (enable)
+			icc_enable(mdp5_icc_paths[i]);
+		else
+			icc_disable(mdp5_icc_paths[i]);
+	}
+}
+
+static int mdp5_system_suspend(struct device *dev)
+{
+	int ret;
+
+	ret = pm_runtime_force_suspend(dev);
+	if (!ret)
+		mdp5_icc_set(false);
+
+	return ret;
+}
+
+static int mdp5_system_resume(struct device *dev)
+{
+	mdp5_icc_set(true);
+
+	return pm_runtime_force_resume(dev);
+}
+
 static int mdp5_setup_interconnect(struct platform_device *pdev)
 {
 	struct icc_path *path0 = msm_icc_get(&pdev->dev, "mdp0-mem");
@@ -807,6 +848,10 @@ static int mdp5_setup_interconnect(struct platform_device *pdev)
 		icc_set_bw(path1, 0, MBps_to_icc(6400));
 	if (!IS_ERR_OR_NULL(path_rot))
 		icc_set_bw(path_rot, 0, MBps_to_icc(6400));
+
+	mdp5_icc_paths[0] = path0;
+	mdp5_icc_paths[1] = path1;
+	mdp5_icc_paths[2] = path_rot;
 
 	return 0;
 }
@@ -895,7 +940,7 @@ static __maybe_unused int mdp5_runtime_resume(struct device *dev)
 
 static const struct dev_pm_ops mdp5_pm_ops = {
 	SET_RUNTIME_PM_OPS(mdp5_runtime_suspend, mdp5_runtime_resume, NULL)
-	SET_SYSTEM_SLEEP_PM_OPS(pm_runtime_force_suspend, pm_runtime_force_resume)
+	SET_SYSTEM_SLEEP_PM_OPS(mdp5_system_suspend, mdp5_system_resume)
 	.prepare = msm_kms_pm_prepare,
 	.complete = msm_kms_pm_complete,
 };
