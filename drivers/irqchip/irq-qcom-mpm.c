@@ -12,11 +12,13 @@
 #include <linux/irqchip.h>
 #include <linux/irqdomain.h>
 #include <linux/mailbox_client.h>
+#include <linux/mfd/syscon.h>
 #include <linux/module.h>
 #include <linux/of.h>
 #include <linux/of_address.h>
 #include <linux/of_platform.h>
 #include <linux/platform_device.h>
+#include <linux/regmap.h>
 #include <linux/pm_domain.h>
 #include <linux/slab.h>
 #include <linux/soc/qcom/irq.h>
@@ -80,6 +82,9 @@ struct qcom_mpm_priv {
 	raw_spinlock_t lock;
 	struct mbox_client mbox_client;
 	struct mbox_chan *mbox_chan;
+	struct regmap *ipc_regmap;
+	u32 ipc_offset;
+	u32 ipc_bit;
 	struct mpm_gic_map *maps;
 	unsigned int map_cnt;
 	unsigned int reg_stride;
@@ -302,6 +307,10 @@ static int mpm_pd_power_off(struct generic_pm_domain *genpd)
 		qcom_mpm_write(priv, MPM_REG_STATUS, i, 0);
 
 	/* Notify RPM to write vMPM into HW */
+	if (priv->ipc_regmap)
+		return regmap_write(priv->ipc_regmap, priv->ipc_offset,
+				    BIT(priv->ipc_bit));
+
 	ret = mbox_send_message(priv->mbox_chan, NULL);
 	if (ret < 0)
 		return ret;
@@ -415,6 +424,39 @@ static int qcom_mpm_probe(struct platform_device *pdev, struct device_node *pare
 	if (irq < 0)
 		return irq;
 
+	/*
+	 * The IPC register may be given as a syscon, as for the SMD edges:
+	 * the mailbox driver of the APCS also provides the CPU clocks, which
+	 * wait for the RPM clocks, so that the pins, which wake up through
+	 * the MPM, would wait for all of them. The mailbox may come late
+	 * otherwise: get it before registering anything, which a deferral
+	 * would leave behind.
+	 */
+	if (of_property_present(np, "qcom,ipc")) {
+		struct device_node *syscon_np;
+
+		syscon_np = of_parse_phandle(np, "qcom,ipc", 0);
+		if (!syscon_np)
+			return -ENODEV;
+
+		priv->ipc_regmap = syscon_node_to_regmap(syscon_np);
+		of_node_put(syscon_np);
+		if (IS_ERR(priv->ipc_regmap))
+			return dev_err_probe(dev, PTR_ERR(priv->ipc_regmap),
+					     "failed to get the IPC regmap\n");
+
+		if (of_property_read_u32_index(np, "qcom,ipc", 1, &priv->ipc_offset) ||
+		    of_property_read_u32_index(np, "qcom,ipc", 2, &priv->ipc_bit))
+			return dev_err_probe(dev, -EINVAL, "invalid qcom,ipc\n");
+	} else {
+		priv->mbox_client.dev = dev;
+		priv->mbox_client.knows_txdone = true;
+		priv->mbox_chan = mbox_request_channel(&priv->mbox_client, 0);
+		if (IS_ERR(priv->mbox_chan))
+			return dev_err_probe(dev, PTR_ERR(priv->mbox_chan),
+					     "failed to acquire IPC channel\n");
+	}
+
 	genpd = &priv->genpd;
 	genpd->flags = GENPD_FLAG_IRQ_SAFE;
 	genpd->power_off = mpm_pd_power_off;
@@ -426,7 +468,7 @@ static int qcom_mpm_probe(struct platform_device *pdev, struct device_node *pare
 	ret = pm_genpd_init(genpd, NULL, false);
 	if (ret) {
 		dev_err(dev, "failed to init genpd: %d\n", ret);
-		return ret;
+		goto free_mbox;
 	}
 
 	ret = of_genpd_add_provider_simple(np, genpd);
@@ -435,20 +477,11 @@ static int qcom_mpm_probe(struct platform_device *pdev, struct device_node *pare
 		goto remove_genpd;
 	}
 
-	priv->mbox_client.dev = dev;
-	priv->mbox_client.knows_txdone = true;
-	priv->mbox_chan = mbox_request_channel(&priv->mbox_client, 0);
-	if (IS_ERR(priv->mbox_chan)) {
-		ret = PTR_ERR(priv->mbox_chan);
-		dev_err(dev, "failed to acquire IPC channel: %d\n", ret);
-		return ret;
-	}
-
 	parent_domain = irq_find_host(parent);
 	if (!parent_domain) {
 		dev_err(dev, "failed to find MPM parent domain\n");
 		ret = -ENXIO;
-		goto free_mbox;
+		goto remove_provider;
 	}
 
 	priv->domain = irq_domain_create_hierarchy(parent_domain,
@@ -457,7 +490,7 @@ static int qcom_mpm_probe(struct platform_device *pdev, struct device_node *pare
 	if (!priv->domain) {
 		dev_err(dev, "failed to create MPM domain\n");
 		ret = -ENOMEM;
-		goto free_mbox;
+		goto remove_provider;
 	}
 
 	irq_domain_update_bus_token(priv->domain, DOMAIN_BUS_WAKEUP);
@@ -471,10 +504,13 @@ static int qcom_mpm_probe(struct platform_device *pdev, struct device_node *pare
 
 remove_domain:
 	irq_domain_remove(priv->domain);
-free_mbox:
-	mbox_free_channel(priv->mbox_chan);
+remove_provider:
+	of_genpd_del_provider(np);
 remove_genpd:
 	pm_genpd_remove(genpd);
+free_mbox:
+	if (priv->mbox_chan)
+		mbox_free_channel(priv->mbox_chan);
 	return ret;
 }
 
