@@ -331,6 +331,34 @@ static bool gic_hwirq_is_mapped(struct mpm_gic_map *maps, int cnt, u32 hwirq)
 	return false;
 }
 
+/*
+ * The CPU power domains under the MPM come up first, and do not wait for it
+ * (cpuidle would wait with them): take them under it here.
+ */
+static void qcom_mpm_link_subdomains(struct device *dev, struct device_node *np)
+{
+	struct of_phandle_args parent = { .np = np }, child = { };
+	struct device_node *node;
+
+	for_each_node_with_property(node, "power-domains") {
+		struct of_phandle_args args;
+		int ret;
+
+		if (of_parse_phandle_with_args(node, "power-domains",
+					       "#power-domain-cells", 0, &args))
+			continue;
+		of_node_put(args.np);
+		if (args.np != np)
+			continue;
+
+		child.np = node;
+		ret = of_genpd_add_subdomain(&parent, &child);
+		if (ret)
+			dev_warn(dev, "failed to take %pOF under the MPM: %d\n",
+				 node, ret);
+	}
+}
+
 static int qcom_mpm_probe(struct platform_device *pdev, struct device_node *parent)
 {
 	struct device_node *np = pdev->dev.of_node;
@@ -476,6 +504,8 @@ static int qcom_mpm_probe(struct platform_device *pdev, struct device_node *pare
 		dev_err(dev, "failed to add genpd provider: %d\n", ret);
 		goto remove_genpd;
 	}
+
+	qcom_mpm_link_subdomains(dev, np);
 
 	parent_domain = irq_find_host(parent);
 	if (!parent_domain) {
