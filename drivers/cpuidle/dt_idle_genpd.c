@@ -137,6 +137,17 @@ int dt_idle_pd_init_topology(struct device_node *np)
 					"#power-domain-cells", 0, &parent))
 			continue;
 
+		/*
+		 * A parent outside of the node, such as the MPM the RPM is
+		 * told the wakeup interrupts through, probes on its own time:
+		 * waiting for it held cpuidle back and the boot sometimes hung.
+		 * It links its children itself.
+		 */
+		if (parent.np->parent != np) {
+			of_node_put(parent.np);
+			continue;
+		}
+
 		child.np = node;
 		child.args_count = 0;
 		ret = of_genpd_add_subdomain(&parent, &child);

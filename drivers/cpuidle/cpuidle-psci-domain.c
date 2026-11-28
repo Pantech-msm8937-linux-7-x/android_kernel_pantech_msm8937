@@ -12,7 +12,6 @@
 #include <linux/cpu.h>
 #include <linux/device.h>
 #include <linux/kernel.h>
-#include <linux/of_platform.h>
 #include <linux/platform_device.h>
 #include <linux/pm_domain.h>
 #include <linux/pm_runtime.h>
@@ -128,40 +127,6 @@ static const struct of_device_id psci_of_match[] = {
 	{}
 };
 
-/*
- * A domain may have a parent outside of the PSCI node, such as the MPM that
- * the RPM is told the wakeup interrupts through, whose driver may well probe
- * later. Linking to it fails then, and tearing the domains down again does
- * not go well: wait for the parents before setting anything up.
- */
-static bool psci_pd_parents_ready(struct device_node *np)
-{
-	for_each_child_of_node_scoped(np, node) {
-		struct of_phandle_args parent;
-		struct platform_device *pdev;
-		bool ready;
-
-		if (of_parse_phandle_with_args(node, "power-domains",
-					       "#power-domain-cells", 0, &parent))
-			continue;
-
-		if (parent.np->parent == np) {
-			of_node_put(parent.np);
-			continue;
-		}
-
-		pdev = of_find_device_by_node(parent.np);
-		of_node_put(parent.np);
-		ready = pdev && device_is_bound(&pdev->dev);
-		if (pdev)
-			put_device(&pdev->dev);
-		if (!ready)
-			return false;
-	}
-
-	return true;
-}
-
 static int psci_cpuidle_domain_probe(struct platform_device *pdev)
 {
 	struct device_node *np = pdev->dev.of_node;
@@ -171,9 +136,6 @@ static int psci_cpuidle_domain_probe(struct platform_device *pdev)
 
 	if (!np)
 		return -ENODEV;
-
-	if (!psci_pd_parents_ready(np))
-		return -EPROBE_DEFER;
 
 
 	/*
