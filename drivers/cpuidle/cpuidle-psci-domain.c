@@ -18,6 +18,7 @@
 #include <linux/psci.h>
 #include <linux/slab.h>
 #include <linux/string.h>
+#include <linux/suspend.h>
 
 #include "cpuidle-psci.h"
 #include "dt_idle_genpd.h"
@@ -29,6 +30,20 @@ struct psci_pd_provider {
 
 static LIST_HEAD(psci_pd_providers);
 
+/* Domains to be powered off for suspend to idle only, see psci_pd_init() */
+static struct generic_pm_domain *psci_s2idle_only_pds[4];
+
+static bool psci_pd_s2idle_only(struct generic_pm_domain *pd)
+{
+	int i;
+
+	for (i = 0; i < ARRAY_SIZE(psci_s2idle_only_pds); i++)
+		if (psci_s2idle_only_pds[i] == pd)
+			return true;
+
+	return false;
+}
+
 static int psci_pd_power_off(struct generic_pm_domain *pd)
 {
 	struct genpd_power_state *state = &pd->states[pd->state_idx];
@@ -36,6 +51,9 @@ static int psci_pd_power_off(struct generic_pm_domain *pd)
 
 	if (!state->data)
 		return 0;
+
+	if (psci_pd_s2idle_only(pd) && !idle_should_enter_s2idle())
+		return -EBUSY;
 
 	/* OSI mode is enabled, set the corresponding domain state. */
 	pd_state = state->data;
@@ -89,6 +107,22 @@ static int psci_pd_init(struct device_node *np, bool use_osi)
 	pd_provider->node = of_node_get(np);
 	list_add(&pd_provider->link, &psci_pd_providers);
 
+	/*
+	 * A state the platform does not come back from in idle, such as the
+	 * system power collapse with XO shut down on MSM8937, may still do
+	 * for suspend to idle.
+	 */
+	if (of_property_read_bool(np, "qcom,s2idle-only")) {
+		int i;
+
+		for (i = 0; i < ARRAY_SIZE(psci_s2idle_only_pds); i++) {
+			if (!psci_s2idle_only_pds[i]) {
+				psci_s2idle_only_pds[i] = pd;
+				break;
+			}
+		}
+	}
+
 	pr_debug("init PM domain %s\n", pd->name);
 	return 0;
 
@@ -136,6 +170,7 @@ static int psci_cpuidle_domain_probe(struct platform_device *pdev)
 
 	if (!np)
 		return -ENODEV;
+
 
 
 	/*

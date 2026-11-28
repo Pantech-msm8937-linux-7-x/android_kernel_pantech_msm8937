@@ -465,6 +465,11 @@
 
 		system_pd: power-domain-system {
 			#power-domain-cells = <0>;
+			/*
+			 * Taken from idle, with XO shut down, CPUs did not
+			 * come back (RCU stalls); system suspend wakes up fine.
+			 */
+			qcom,s2idle-only;
 			power-domains = <&mpm>;
 			domain-idle-states = <&system_sleep_0>;
 		};
