@@ -1090,12 +1090,44 @@ static int rpmpd_power_on(struct generic_pm_domain *domain)
 	return ret;
 }
 
+/*
+ * A level resource left without a vote is not taken to its lowest by every
+ * RPM firmware: on MSM8937 RPM.BF.2.2-00199 goes no deeper than XO shutdown
+ * then (VDD min stays out), where -00187 does. Leave the levels at retention,
+ * in both sets, as the downstream regulators do, rather than unvoted.
+ */
+static int rpmpd_level_retention(struct rpmpd *pd)
+{
+	unsigned int peer_active = 0, peer_sleep = 0;
+	struct rpmpd *peer = pd->peer;
+	int ret;
+
+	if (peer && peer->enabled && peer->state_synced)
+		to_active_sleep(peer, peer->corner, &peer_active, &peer_sleep);
+
+	ret = rpmpd_send_corner(pd, QCOM_SMD_RPM_ACTIVE_STATE,
+				max_t(unsigned int, RPM_SMD_LEVEL_RETENTION, peer_active));
+	if (ret)
+		return ret;
+
+	return rpmpd_send_corner(pd, QCOM_SMD_RPM_SLEEP_STATE,
+				 max_t(unsigned int, RPM_SMD_LEVEL_RETENTION, peer_sleep));
+}
+
 static int rpmpd_power_off(struct generic_pm_domain *domain)
 {
 	int ret;
 	struct rpmpd *pd = domain_to_rpmpd(domain);
 
 	mutex_lock(&rpmpd_lock);
+
+	if (pd->key == KEY_LEVEL && pd->state_synced) {
+		ret = rpmpd_level_retention(pd);
+		if (!ret)
+			pd->enabled = false;
+		mutex_unlock(&rpmpd_lock);
+		return ret;
+	}
 
 	ret = rpmpd_send_enable(pd, false);
 	if (!ret)
